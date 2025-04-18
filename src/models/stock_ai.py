@@ -94,7 +94,9 @@ class MultimodalStockPredictor(nn.Module):
                  time_series_hidden_dim=128,
                  time_series_out_dim=128,
                  audio_encoder=None,
-                 time_series_encoder=None):
+                 time_series_encoder=None,
+                 freeze_text_encoder=False,
+                 freeze_vision_encoder=False):
         """
         Args:
             text_model_name (str): HuggingFace model name for text encoder.
@@ -119,24 +121,33 @@ class MultimodalStockPredictor(nn.Module):
             time_series_out_dim (int): Output dimension for time series encoder.
             audio_encoder (nn.Module or None): Custom audio encoder.
             time_series_encoder (nn.Module or None): Custom time series encoder.
+            freeze_text_encoder (bool): If True, freeze text encoder weights.
+            freeze_vision_encoder (bool): If True, freeze vision encoder weights.
         """
         super().__init__()
         # Text encoder (large transformer)
         self.text_config = AutoConfig.from_pretrained(text_model_name)
         self.text_encoder = AutoModel.from_pretrained(text_model_name, config=self.text_config)
+        if freeze_text_encoder:
+            for param in self.text_encoder.parameters():
+                param.requires_grad = False
         
         # Optional: Vision encoder (for chart images, etc.)
         if vision_model_name:
             self.vision_config = AutoConfig.from_pretrained(vision_model_name)
             self.vision_encoder = AutoModel.from_pretrained(vision_model_name, config=self.vision_config)
+            if freeze_vision_encoder:
+                for param in self.vision_encoder.parameters():
+                    param.requires_grad = False
             vision_out_dim = self.vision_config.hidden_size
         else:
             self.vision_encoder = None
             vision_out_dim = 0
 
-        # Tabular (numerical) data encoder with dropout
+        # Tabular (numerical) data encoder with dropout and batchnorm
         self.tabular_encoder = nn.Sequential(
             nn.Linear(tabular_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             activation(),
             nn.Dropout(tabular_dropout),
             nn.LayerNorm(hidden_dim)
@@ -176,6 +187,7 @@ class MultimodalStockPredictor(nn.Module):
         in_dim = fusion_dim
         for i in range(fusion_layers - 1):
             fusion_head_layers.append(nn.Linear(in_dim, hidden_dim))
+            fusion_head_layers.append(nn.BatchNorm1d(hidden_dim))
             fusion_head_layers.append(activation())
             fusion_head_layers.append(nn.Dropout(fusion_dropout))
             if fusion_layernorm:
@@ -226,8 +238,11 @@ class MultimodalStockPredictor(nn.Module):
         # Attention-based fusion (optional)
         if self.attn_fusion is not None:
             features_seq = features.unsqueeze(1)
-            attn_out, _ = self.attn_fusion(features_seq, features_seq, features_seq)
+            attn_out, attn_weights = self.attn_fusion(features_seq, features_seq, features_seq)
             features = attn_out.squeeze(1)
+            self.last_attn_weights = attn_weights
+        else:
+            self.last_attn_weights = None
 
         # Residual connection (optional)
         if self.use_residual_fusion:
