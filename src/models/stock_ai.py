@@ -57,8 +57,15 @@ import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoConfig
 # Add imports for optional encoders
-from .audio_encoder import AudioEncoder
-from .time_series_encoder import TimeSeriesEncoder
+try:
+    from .audio_encoder import AudioEncoder
+except ImportError:
+    AudioEncoder = None
+
+try:
+    from .time_series_encoder import TimeSeriesEncoder
+except ImportError:
+    TimeSeriesEncoder = None
 
 class MultimodalStockPredictor(nn.Module):
     """

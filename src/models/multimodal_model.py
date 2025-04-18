@@ -1,9 +1,25 @@
 import torch
 import torch.nn as nn
-from .image_encoder import ImageEncoder
-from .text_encoder import TextEncoder
-from .audio_encoder import AudioEncoder
-from .time_series_encoder import TimeSeriesEncoder
+try:
+    from .image_encoder import ImageEncoder
+except ImportError:
+    ImageEncoder = None
+
+try:
+    from .text_encoder import TextEncoder
+except ImportError:
+    TextEncoder = None
+
+try:
+    from .audio_encoder import AudioEncoder
+except ImportError:
+    AudioEncoder = None
+
+try:
+    from .time_series_encoder import TimeSeriesEncoder
+except ImportError:
+    TimeSeriesEncoder = None
+
 from .fusion import GatedFusion, CrossModalAttention
 
 class MultiModalModel(nn.Module):
