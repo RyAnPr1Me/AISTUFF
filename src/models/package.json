@@ -1,0 +1,24 @@
+{
+  "name": "multimodal-stock-predictor",
+  "version": "0.1.0",
+  "description": "A PyTorch model for stock movement prediction using text, tabular, and optional vision data.",
+  "main": "stock_ai.py",
+  "keywords": [
+    "stock",
+    "multimodal",
+    "pytorch",
+    "transformers",
+    "finance",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "torch": ">=2.0.0",
+    "transformers": ">=4.40.0",
+    "scikit-learn": "*",
+    "pandas": "*",
+    "numpy": "*",
+    "tqdm": "*"
+  }
+}
