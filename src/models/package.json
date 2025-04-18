@@ -12,13 +12,5 @@
     "ai"
   ],
   "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "torch": ">=2.0.0",
-    "transformers": ">=4.40.0",
-    "scikit-learn": "*",
-    "pandas": "*",
-    "numpy": "*",
-    "tqdm": "*"
-  }
+  "license": "MIT"
 }
