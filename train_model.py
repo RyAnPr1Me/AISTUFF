@@ -1,6 +1,7 @@
 import os
 import torch
 import pandas as pd
+import torch.nn.functional as F
 from transformers import AutoTokenizer
 from src.models.stock_ai import MultimodalStockPredictor
 from torch.utils.data import DataLoader, Dataset
@@ -15,7 +16,7 @@ BATCH_SIZE = 8
 EPOCHS = 5
 LR = 1e-4
 TEXT_MODEL_NAME = "bert-large-uncased"
-TABULAR_DIM = 64
+DEFAULT_TABULAR_DIM = 64  # Only used if no features present
 
 class StockDataset(Dataset):
     def __init__(self, input_ids, attention_mask, tabular_data, labels):
@@ -52,11 +53,13 @@ def main():
 
     # Process tabular data
     if 'feature_0' not in data.columns:
-        tabular_data = torch.randn(len(data), TABULAR_DIM)
+        tabular_data = torch.randn(len(data), DEFAULT_TABULAR_DIM)
+        actual_tabular_dim = DEFAULT_TABULAR_DIM
     else:
         features = data[[col for col in data.columns if col.startswith("feature_")]]
         scaler = StandardScaler()
         tabular_data = torch.tensor(scaler.fit_transform(features.values), dtype=torch.float)
+        actual_tabular_dim = tabular_data.shape[1]
 
     labels = torch.tensor(data["label"].values, dtype=torch.long)
 
@@ -68,8 +71,8 @@ def main():
     train_dataset = StockDataset(X_ids_train, X_mask_train, t_train, y_train)
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-    # Initialize model, loss, optimizer
-    model = MultimodalStockPredictor(tabular_dim=TABULAR_DIM)
+    # Initialize model with correct tabular dimension
+    model = MultimodalStockPredictor(tabular_dim=actual_tabular_dim)
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
 
