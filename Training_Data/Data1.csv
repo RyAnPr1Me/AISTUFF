@@ -1,0 +1,7 @@
+text,feature_0,feature_1,feature_2,feature_3,feature_4,label
+"AAPL earnings beat expectations",150.00,151.30,148.50,155.00,10000000,1
+"AAPL reports lower than expected",149.00,150.20,148.00,152.50,12000000,0
+"Tesla announces new vehicle launch",700.00,705.00,690.00,710.00,15000000,1
+"Tesla faces regulatory issues",695.00,700.00,690.50,705.00,13000000,0
+"GOOGL stock goes up after product launch",2800.00,2850.00,2750.00,2900.00,8000000,1
+"GOOGL reports disappointing earnings",2750.00,2780.00,2730.00,2800.00,9500000,0
