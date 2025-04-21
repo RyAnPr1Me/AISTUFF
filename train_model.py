@@ -2,7 +2,7 @@ import os
 import torch
 import pandas as pd
 from transformers import AutoTokenizer
-from stock_ai import MultimodalStockPredictor
+from src.models.stock_ai import MultimodalStockPredictor  # Corrected import
 from torch.utils.data import DataLoader, Dataset
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -59,6 +59,7 @@ def main():
     train_dataset = StockDataset(X_train, t_train, y_train)
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
+    # Initialize model, loss function, and optimizer
     model = MultimodalStockPredictor()
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
@@ -77,6 +78,7 @@ def main():
             optimizer.step()
         print(f"Epoch {epoch + 1}/{EPOCHS} complete. Loss: {loss.item()}")
 
+    # Save the trained model
     os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
     print(f"Model saved to {MODEL_SAVE_PATH}")
