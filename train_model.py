@@ -1,5 +1,4 @@
 import os
-import sys
 import torch
 import pandas as pd
 from transformers import AutoTokenizer
@@ -8,8 +7,8 @@ from torch.utils.data import DataLoader, Dataset
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
-DATA_DIR = "Training_Data"
-MODEL_SAVE_PATH = "trained_model/model_weights.pt"
+VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
+MODEL_SAVE_PATH = "trained_model/model_weights.pth"
 
 # Parameters
 BATCH_SIZE = 8
@@ -18,7 +17,6 @@ LR = 1e-4
 TEXT_MODEL_NAME = "bert-large-uncased"
 TABULAR_DIM = 64
 
-# 1. Define custom dataset
 class StockDataset(Dataset):
     def __init__(self, text_data, tabular_data, labels):
         self.text_data = text_data
@@ -35,38 +33,16 @@ class StockDataset(Dataset):
             "label": self.labels[idx]
         }
 
-def is_valid_csv(df):
-    # Check if required columns exist
-    return {'text', 'label'}.issubset(df.columns)
-
 def main():
-    print("Loading data from:", DATA_DIR)
-    csv_files = [f for f in os.listdir(DATA_DIR) if f.endswith(".csv")]
-    if not csv_files:
-        print("No CSV files found in Training_Data.")
-        sys.exit(1)
+    # Load validated data
+    print(f"Loading validated data from {VALIDATED_DATA_PATH}")
+    data = pd.read_csv(VALIDATED_DATA_PATH)
 
-    df_list = []
-    for f in csv_files:
-        path = os.path.join(DATA_DIR, f)
-        try:
-            df = pd.read_csv(path)
-            if not is_valid_csv(df):
-                print(f"[ERROR] Missing required columns in {f}.")
-                sys.exit(1)
-            df_list.append(df)
-        except Exception as e:
-            print(f"[ERROR] Could not load {f}: {e}")
-            sys.exit(1)
-
-    data = pd.concat(df_list)
-    data = data.dropna(subset=["text", "label"])
-
-    # Tokenize text
+    # Tokenize text using HuggingFace tokenizer
     tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
     text_tokens = tokenizer(list(data["text"]), padding=True, truncation=True, return_tensors="pt")
 
-    # Simulate tabular data if not provided
+    # If no tabular data is available, generate random tabular data
     if 'feature_0' not in data.columns:
         tabular_data = torch.randn(len(data), TABULAR_DIM)
     else:
@@ -76,7 +52,7 @@ def main():
 
     labels = torch.tensor(data["label"].values, dtype=torch.long)
 
-    # Train/val split
+    # Train/validation split
     X_train, X_val, t_train, t_val, y_train, y_val = train_test_split(
         text_tokens['input_ids'], tabular_data, labels, test_size=0.2)
 
@@ -87,7 +63,6 @@ def main():
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
 
-    # Training loop
     print("Starting training...")
     model.train()
     for epoch in range(EPOCHS):
@@ -108,3 +83,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
