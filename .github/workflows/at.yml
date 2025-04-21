@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'Training_Data/**'  # Trigger whenever new files are added to the 'Training_Data' folder
+  workflow_dispatch:  # This allows you to manually trigger the workflow
 
 jobs:
   validate-train:
