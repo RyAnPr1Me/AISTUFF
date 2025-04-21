@@ -1,0 +1,45 @@
+name: Train AI on New Data
+
+on:
+  push:
+    paths:
+      - 'Training_Data/**'  # Trigger whenever new files are added to the 'Training_Data' folder
+
+jobs:
+  validate-train:
+    name: Validate and Train AI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Validate and Prepare Data
+        run: |
+          python validate_and_prepare.py  # Validate and prepare the training data
+
+      - name: Train AI Model
+        run: |
+          python train_model.py  # Train the AI model
+
+      - name: Save Trained Model
+        run: |
+          mkdir -p trained_model
+          mv model_weights.pth trained_model/  # Move the model weights to 'trained_model/'
+
+      - name: Commit Trained Model
+        uses: EndBug/add-and-commit@v7
+        with:
+          author_name: 'GitHub Actions'
+          author_email: 'actions@github.com'
+          message: 'Updated trained model weights'
+          add: 'trained_model/model_weights.pth'  # Commit the updated model weights
