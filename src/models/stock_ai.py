@@ -330,6 +330,9 @@ class MultimodalStockPredictor(nn.Module):
             last_attn_weights (Tensor or None): Attention weights if available.
         """
         self._validate_inputs(text_inputs, tabular_inputs, vision_inputs, audio_inputs, time_series_inputs)
+        # Ensure tabular_inputs is 2D [batch, tabular_dim]
+        if tabular_inputs is not None and tabular_inputs.ndim > 2:
+            tabular_inputs = tabular_inputs.view(tabular_inputs.shape[0], -1)
         # Mixed precision context if enabled
         if self.use_mixed_precision:
             from torch.cuda.amp import autocast
@@ -482,6 +485,9 @@ class MultimodalStockPredictor(nn.Module):
             features (Tensor): Concatenated feature vector.
         """
         self._validate_inputs(text_inputs, tabular_inputs, vision_inputs, audio_inputs, time_series_inputs)
+        # Ensure tabular_inputs is 2D [batch, tabular_dim]
+        if tabular_inputs is not None and tabular_inputs.ndim > 2:
+            tabular_inputs = tabular_inputs.view(tabular_inputs.shape[0], -1)
         text_outputs = self.text_encoder(**text_inputs)
         text_feat = text_outputs.last_hidden_state[:, 0, :]
         tabular_feat = self.tabular_encoder(tabular_inputs)

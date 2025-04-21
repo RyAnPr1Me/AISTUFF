@@ -72,6 +72,13 @@ def multimodal_collate_fn(batch):
             batch_out[key] = {k: torch.stack([b[key][k] for b in batch]) for k in batch[0][key]}
         elif key == 'label':
             batch_out[key] = torch.stack([b[key] for b in batch])
+        elif key == 'tabular_inputs':
+            stacked = torch.stack([b[key] for b in batch])
+            # Ensure shape is [batch, tabular_dim]
+            if stacked.ndim > 2:
+                # Flatten all but the batch dimension
+                stacked = stacked.view(stacked.shape[0], -1)
+            batch_out[key] = stacked
         else:
             batch_out[key] = torch.stack([b[key] for b in batch])
     return batch_out
