@@ -1,0 +1,52 @@
+name: AI Training on New Data
+
+on:
+  push:
+    paths:
+      - 'Training_Data/**'  # Trigger whenever new files are added to the 'Training_Data' folder
+  pull_request:
+    paths:
+      - 'Training_Data/**'  # Trigger for PRs involving changes to the 'Training_Data' folder
+
+jobs:
+  train:
+    name: Train AI Model on New Data
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'  # Adjust the Python version to suit your setup
+
+      # Step 3: Install necessary dependencies (Make sure 'requirements.txt' includes all dependencies for your AI model)
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Step 4: Run AI training script on the new data
+      - name: Train AI model on new data
+        run: |
+          python train_model.py --data-dir Training_Data  # Adjust based on your script's requirements
+
+      # Step 5: Move the trained model to a designated location (e.g., 'trained_model/')
+      - name: Save trained model
+        run: |
+          mkdir -p trained_model
+          mv model_weights.h5 trained_model/  # Move the model weights or trained file
+
+      # Step 6: Optionally, push the updated model back to the repository or a cloud storage
+      - name: Commit and push the trained model (optional)
+        uses: EndBug/add-and-commit@v7
+        with:
+          author_name: 'GitHub Actions'
+          author_email: 'actions@github.com'
+          message: 'Add newly trained model'
+          add: 'trained_model/*'  # Specify the trained model's path
+
