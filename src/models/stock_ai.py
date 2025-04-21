@@ -122,7 +122,7 @@ class MultimodalStockPredictor(nn.Module):
     def __init__(self, 
                  text_model_name="bert-large-uncased",
                  vision_model_name=None,
-                 tabular_dim=64,
+                 tabular_dim=64,  # <-- Change this to match your data, e.g., tabular_dim=5
                  audio_dim=None,
                  time_series_dim=None,
                  hidden_dim=1024,
@@ -163,6 +163,7 @@ class MultimodalStockPredictor(nn.Module):
             ...existing code...
         """
         super().__init__()
+        self.tabular_dim = tabular_dim  # Save for runtime check
         # Text encoder (large transformer)
         self.text_config = AutoConfig.from_pretrained(text_model_name)
         self.text_encoder = AutoModel.from_pretrained(text_model_name, config=self.text_config)
@@ -333,6 +334,9 @@ class MultimodalStockPredictor(nn.Module):
         # Ensure tabular_inputs is 2D [batch, tabular_dim]
         if tabular_inputs is not None and tabular_inputs.ndim > 2:
             tabular_inputs = tabular_inputs.view(tabular_inputs.shape[0], -1)
+        # Add runtime check for feature dimension
+        if tabular_inputs is not None and tabular_inputs.shape[1] != self.tabular_dim:
+            raise ValueError(f"tabular_inputs.shape[1] ({tabular_inputs.shape[1]}) does not match model tabular_dim ({self.tabular_dim}).")
         # Mixed precision context if enabled
         if self.use_mixed_precision:
             from torch.cuda.amp import autocast
