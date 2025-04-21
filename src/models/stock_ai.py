@@ -249,7 +249,7 @@ class MultimodalStockPredictor(nn.Module):
 
         # Self-attention block after fusion (optional)
         self.use_self_attention = use_self_attention
-        if use_self_attention:
+        if self.use_self_attention:
             encoder_layer = nn.TransformerEncoderLayer(
                 d_model=fusion_dim,
                 nhead=self_attention_heads,
@@ -274,7 +274,7 @@ class MultimodalStockPredictor(nn.Module):
 
         # Ensemble (optional)
         self.use_ensemble = use_ensemble
-        if use_ensemble:
+        if self.use_ensemble:
             self.ensemble = nn.ModuleList([
                 nn.Sequential(*fusion_head_layers) for _ in range(ensemble_size)
             ])
@@ -331,8 +331,81 @@ class MultimodalStockPredictor(nn.Module):
         """
         self._validate_inputs(text_inputs, tabular_inputs, vision_inputs, audio_inputs, time_series_inputs)
         # Mixed precision context if enabled
-        autocast_ctx = torch.cuda.amp.autocast if self.use_mixed_precision else lambda: (yield)
-        with autocast_ctx():
+        if self.use_mixed_precision:
+            from torch.cuda.amp import autocast
+            autocast_ctx = autocast
+        else:
+            autocast_ctx = None
+        if autocast_ctx is not None:
+            with autocast_ctx():
+                # Text encoding
+                text_outputs = self.text_encoder(**text_inputs)
+                text_feat = text_outputs.last_hidden_state[:, 0, :]  # [CLS] token
+
+                # Tabular encoding
+                tabular_feat = self.tabular_encoder(tabular_inputs)
+
+                features_list = [text_feat, tabular_feat]
+
+                # Vision encoding (optional)
+                if self.vision_encoder and vision_inputs is not None:
+                    vision_outputs = self.vision_encoder(**vision_inputs)
+                    vision_feat = vision_outputs.last_hidden_state[:, 0, :]
+                    features_list.append(vision_feat)
+
+                # Audio encoding (optional)
+                if self.audio_encoder and audio_inputs is not None:
+                    audio_feat = self.audio_encoder(audio_inputs)
+                    features_list.append(audio_feat)
+
+                # Time series encoding (optional)
+                if self.time_series_encoder and time_series_inputs is not None:
+                    ts_feat = self.time_series_encoder(time_series_inputs)
+                    features_list.append(ts_feat)
+
+                # --- Fusion ---
+                if self.fusion_type == 'gated':
+                    fused = self.fusion(features_list)
+                elif self.fusion_type == 'cross_attention':
+                    fused = self.fusion(features_list[0], features_list[1])
+                else:
+                    fused = torch.cat(features_list, dim=1)
+
+                features = fused
+
+                # Self-attention block (optional)
+                if self.transformer_encoder is not None:
+                    features = features.unsqueeze(1)  # (batch, seq=1, dim)
+                    features = self.transformer_encoder(features)
+                    features = features.squeeze(1)
+
+                # Attention-based fusion (optional, legacy)
+                if self.attn_fusion is not None:
+                    features_seq = features.unsqueeze(1)
+                    attn_out, attn_weights = self.attn_fusion(features_seq, features_seq, features_seq)
+                    features = attn_out.squeeze(1)
+                    self.last_attn_weights = attn_weights
+                else:
+                    self.last_attn_weights = None
+
+                # Stochastic depth (optional)
+                if self.use_stochastic_depth and self.training:
+                    features = self.stochastic_depth(features, self.stochastic_depth_prob, self.training)
+
+                # Dropout scheduler (optional)
+                self.set_dropout(epoch, max_epochs)
+
+                # Residual connection (optional)
+                if self.use_ensemble:
+                    logits_list = [head(features) for head in self.ensemble]
+                    logits = torch.stack(logits_list, dim=0).mean(dim=0)
+                elif self.use_residual_fusion:
+                    fusion_input = features
+                    logits = self.fusion_head(features)
+                    logits += fusion_input[:, :logits.shape[1]]
+                else:
+                    logits = self.fusion_head(features)
+        else:
             # Text encoding
             text_outputs = self.text_encoder(**text_inputs)
             text_feat = text_outputs.last_hidden_state[:, 0, :]  # [CLS] token
