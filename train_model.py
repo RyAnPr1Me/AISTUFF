@@ -54,6 +54,17 @@ class StockDataset(Dataset):
             "label": self.labels[idx]
         }
 
+# Validate model weights
+
+def is_valid_model_file(file_path):
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(2)
+        return header and header[0] == 0x80
+    except Exception as e:
+        logging.warning(f"Error reading model file header: {e}")
+        return False
+
 # Main training function
 def main():
     setup_logging()
@@ -117,17 +128,20 @@ def main():
 
     # Load existing checkpoint if valid
     if os.path.exists(MODEL_SAVE_PATH):
-        try:
-            with open(MODEL_SAVE_PATH, 'rb') as f:
-                header = f.read(2)
-            if header and header[0] == 0x80:
+        if is_valid_model_file(MODEL_SAVE_PATH):
+            try:
                 state = torch.load(MODEL_SAVE_PATH)
                 model.load_state_dict(state)
                 logging.info(f"Loaded model from {MODEL_SAVE_PATH}")
-            else:
-                raise ValueError("Invalid model file header.")
-        except Exception as e:
-            logging.warning(f"Could not load existing model: {e}")
+            except Exception as e:
+                logging.warning(f"Failed to load model state: {e}")
+                try:
+                    os.remove(MODEL_SAVE_PATH)
+                    logging.info("Removed corrupt model file.")
+                except:
+                    pass
+        else:
+            logging.warning("Invalid model file header; removing file.")
             try:
                 os.remove(MODEL_SAVE_PATH)
                 logging.info("Removed corrupt model file.")
