@@ -77,14 +77,20 @@ def main():
         input_ids, attention_mask, tabular_data, labels, test_size=0.2
     )
 
+    # Create Datasets
     train_dataset = StockDataset(X_ids_train, X_mask_train, t_train, y_train)
+    val_dataset = StockDataset(X_ids_val, X_mask_val, t_val, y_val)
+
+    # Create DataLoaders
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
     # Initialize model, loss, optimizer
     model = MultimodalStockPredictor(tabular_dim=TABULAR_DIM)  # Ensure model expects 64 features
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
 
+    # Training loop
     print("Starting training...")
     model.train()
     for epoch in range(EPOCHS):
@@ -109,7 +115,7 @@ def main():
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for batch in train_loader:  # Replace with validation dataloader if available
+            for batch in val_loader:  # Use validation dataloader
                 logits = model(
                     {
                         "input_ids": batch["input_ids"],
@@ -120,13 +126,15 @@ def main():
                 loss = loss_fn(logits, batch["label"])
                 val_loss += loss.item()
 
-        print(f"Epoch {epoch + 1}/{EPOCHS} Validation Loss: {val_loss / len(train_loader)}")
+        print(f"Epoch {epoch + 1}/{EPOCHS} Validation Loss: {val_loss / len(val_loader)}")
         model.train()
 
+    # Save model
     os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
     print(f"Model saved to {MODEL_SAVE_PATH}")
 
 if __name__ == "__main__":
     main()
+
 
