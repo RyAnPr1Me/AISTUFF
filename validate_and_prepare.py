@@ -22,56 +22,112 @@ def validate_and_clean(df: pd.DataFrame,
                        required_columns: list,
                        tokenizer: AutoTokenizer) -> pd.DataFrame:
     """
-    Validate and clean a DataFrame:
-     - Ensure required columns are present.
+    Enhanced, adaptable validation and cleaning:
+     - Ensure required columns are present (case-insensitive, flexible mapping).
+     - Attempt to infer/rename columns if possible.
      - Drop rows with NaNs in required columns.
      - Strip and drop empty text entries.
-     - Convert labels to numeric.
-     - Test tokenization on a sample of text.
+     - Convert labels to numeric and check for valid values.
+     - Remove rows with outlier/invalid values in numeric columns.
+     - Test tokenization on a sample of text if text exists.
      - Drop duplicate rows.
-
+     - Log summary statistics.
     Returns cleaned DataFrame or None if validation fails.
     """
-    missing = set(required_columns) - set(df.columns)
-    if missing:
-        logging.error(f"Missing required columns: {missing}")
-        return None
+    # Flexible column mapping (case-insensitive, allow synonyms)
+    col_map = {c.lower(): c for c in df.columns}
+    required_map = {}
+    synonyms = {
+        'text': ['text', 'headline', 'news', 'sentence', 'content', 'body'],
+        'label': ['label', 'target', 'class', 'y'],
+    }
+    for req in required_columns:
+        found = None
+        # Try direct match
+        if req in col_map:
+            found = col_map[req]
+        else:
+            # Try synonyms
+            for syn in synonyms.get(req, []):
+                if syn in col_map:
+                    found = col_map[syn]
+                    break
+        if found:
+            required_map[req] = found
+        else:
+            logging.error(f"Missing required column (or synonym): '{req}'")
+            return None
 
-    df = df.copy()
+    # Rename columns to standard names for downstream processing
+    df = df.rename(columns={v: k for k, v in required_map.items()})
+
     # Drop rows with missing values in required columns
+    before = len(df)
     df.dropna(subset=required_columns, inplace=True)
+    after = len(df)
+    if before != after:
+        logging.info(f"Dropped {before - after} rows with missing values in required columns.")
 
     # Clean text column
-    df['text'] = df['text'].astype(str).str.strip()
-    empty_text = df['text'] == ''
-    if empty_text.any():
-        count = empty_text.sum()
-        logging.warning(f"Dropping {count} rows with empty text.")
-        df = df[~empty_text]
+    if 'text' in required_columns and 'text' in df.columns:
+        df['text'] = df['text'].astype(str).str.strip()
+        empty_text = df['text'] == ''
+        if empty_text.any():
+            count = empty_text.sum()
+            logging.warning(f"Dropping {count} rows with empty text.")
+            df = df[~empty_text]
 
-    # Convert labels to numeric
-    try:
-        df['label'] = pd.to_numeric(df['label'])
-    except Exception as e:
-        logging.error(f"Label conversion failed: {e}")
-        return None
+    # Convert labels to numeric and check for valid values (0/1 or 0/1/2)
+    if 'label' in required_columns and 'label' in df.columns:
+        try:
+            df['label'] = pd.to_numeric(df['label'])
+        except Exception as e:
+            logging.error(f"Label conversion failed: {e}")
+            return None
+        # Remove rows with invalid label values (allow any int for flexibility, but warn)
+        valid_labels = {0, 1, 2}
+        invalid = ~df['label'].isin(valid_labels)
+        if invalid.any():
+            count = invalid.sum()
+            logging.warning(f"Dropping {count} rows with invalid label values (not in {valid_labels}).")
+            df = df[~invalid]
+        if df['label'].nunique() > 3:
+            logging.warning(f"Label column has more than 3 unique values: {df['label'].unique()}")
 
-    # Test tokenizer on a small sample
-    sample_texts = df['text'].iloc[:min(5, len(df))].tolist()
-    try:
-        tokenizer(sample_texts, padding=True, truncation=True, return_tensors='pt')
-    except Exception as e:
-        logging.error(f"Tokenizer error on sample texts: {e}")
-        return None
+    # Remove outliers in numeric columns (z-score > 5)
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    if len(numeric_cols) > 0:
+        zscores = np.abs((df[numeric_cols] - df[numeric_cols].mean()) / (df[numeric_cols].std(ddof=0) + 1e-8))
+        outlier_mask = (zscores > 5).any(axis=1)
+        if outlier_mask.any():
+            count = outlier_mask.sum()
+            logging.warning(f"Dropping {count} rows with extreme outlier values (z-score > 5).")
+            df = df[~outlier_mask]
 
-    # Drop duplicates based on text+label
+    # Test tokenizer on a small sample if text exists
+    if 'text' in required_columns and 'text' in df.columns:
+        sample_texts = df['text'].iloc[:min(5, len(df))].tolist()
+        try:
+            tokenizer(sample_texts, padding=True, truncation=True, return_tensors='pt')
+        except Exception as e:
+            logging.error(f"Tokenizer error on sample texts: {e}")
+            return None
+
+    # Drop duplicates based on all required columns
     initial_len = len(df)
-    df.drop_duplicates(subset=['text', 'label'], inplace=True)
+    df.drop_duplicates(subset=required_columns, inplace=True)
     dup_dropped = initial_len - len(df)
     if dup_dropped:
-        logging.info(f"Dropped {dup_dropped} duplicate rows.")
+        logging.info(f"Dropped {dup_dropped} duplicate rows based on {required_columns}.")
 
-    return df
+    # Log summary statistics
+    logging.info(f"Final row count: {len(df)}")
+    if len(df) > 0:
+        logging.info(f"Label distribution:\n{df['label'].value_counts().to_dict() if 'label' in df.columns else 'N/A'}")
+        if 'text' in df.columns:
+            logging.info(f"Sample texts: {df['text'].iloc[:2].tolist()}")
+
+    return df if not df.empty else None
 
 
 def main():
@@ -125,11 +181,15 @@ def main():
 
         cleaned = validate_and_clean(df, args.columns, tokenizer)
         if cleaned is None:
-            logging.error(f"Validation failed for {fname}. Aborting.")
-            sys.exit(1)
+            logging.error(f"Validation failed for {fname}. Skipping this file.")
+            continue
 
         logging.info(f"{'Validated' if not cleaned.empty else 'No valid rows in'} {fname}: {len(cleaned)} rows.")
         validated_dfs.append(cleaned)
+
+    if not validated_dfs:
+        logging.error("No valid data after processing all files. Aborting.")
+        sys.exit(1)
 
     # Concatenate all cleaned data
     combined = pd.concat(validated_dfs, ignore_index=True)
