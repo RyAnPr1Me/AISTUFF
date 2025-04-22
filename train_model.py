@@ -97,7 +97,7 @@ def main():
 
     # Load model if it exists to resume training
     if os.path.exists(MODEL_SAVE_PATH):
-        model.load_state_dict(torch.load(MODEL_SAVE_PATH))
+        model.load_state_dict(torch.load(MODEL_SAVE_PATH, weights_only=True))
         print(f"Model loaded from {MODEL_SAVE_PATH}")
     else:
         print("No previous model found, starting from scratch.")
