@@ -30,6 +30,16 @@ data['MACD'] = data['EMA_12'] - data['EMA_26']  # MACD = EMA12 - EMA26
 delta = data['Close'].diff()  # Difference between current and previous day's close
 gain = np.where(delta > 0, delta, 0)  # Positive gains
 loss = np.where(delta < 0, -delta, 0)  # Negative losses
+
+# Convert gain and loss arrays to 1D
+gain = gain.flatten()  # Ensure gain is 1D
+loss = loss.flatten()  # Ensure loss is 1D
+
+# Check if gain and loss arrays have the expected shape
+if gain.shape[0] != len(data) or loss.shape[0] != len(data):
+    raise ValueError("Shape of gain/loss arrays does not match the length of the data!")
+
+# Calculate Average Gain and Loss (Rolling window of 14 days)
 avg_gain = pd.Series(gain).rolling(window=14).mean()  # 14-day average gain
 avg_loss = pd.Series(loss).rolling(window=14).mean()  # 14-day average loss
 rs = avg_gain / avg_loss  # Relative strength
@@ -50,6 +60,10 @@ data.dropna(subset=features, inplace=True)  # Drop rows with NaN in any of the s
 # Normalize features
 scaler = StandardScaler()
 data[features] = scaler.fit_transform(data[features])  # Scale the selected features
+
+# Check if the feature scaling worked correctly
+if data[features].isnull().any().any():
+    raise ValueError("Feature scaling produced NaN values!")
 
 # Create training data folder if it doesn't exist
 output_dir = 'Training_Data'
