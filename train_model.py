@@ -14,19 +14,17 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from tqdm import tqdm
 
 #========================================================================
-# Train Model Script with Robust Checkpointing, Metrics, and Progress Bars
+# Train Model Script without saving to local disk
 #========================================================================
 
-# Paths
+# Paths (removed saving paths)
 VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
-MODEL_SAVE_PATH = "trained_model/model_weights.pth"
-CHECKPOINT_DIR = "trained_model/checkpoints"
 
 # Training parameters
 BATCH_SIZE = 8
 EPOCHS = 50
 LR = 1e-4
-TEXT_MODEL_NAME = "bert-large-uncased"
+TEXT_MODEL_NAME = "bert-base-uncased"
 TABULAR_DIM = 64
 EARLY_STOPPING_PATIENCE = 5
 
@@ -54,26 +52,11 @@ class StockDataset(Dataset):
             "label": self.labels[idx]
         }
 
-# Validate model weights
-
-def is_valid_model_file(file_path):
-    try:
-        with open(file_path, 'rb') as f:
-            header = f.read(2)
-        return header and header[0] == 0x80
-    except Exception as e:
-        logging.warning(f"Error reading model file header: {e}")
-        return False
-
 # Main training function
 def main():
     setup_logging()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Using device: {device}")
-
-    # Ensure directories exist
-    os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
-    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     # Load and preprocess data
     logging.info(f"Loading data from {VALIDATED_DATA_PATH}")
@@ -125,28 +108,6 @@ def main():
 
     # TensorBoard writer
     writer = SummaryWriter(log_dir='runs/stock_model')
-
-    # Load existing checkpoint if valid
-    if os.path.exists(MODEL_SAVE_PATH):
-        if is_valid_model_file(MODEL_SAVE_PATH):
-            try:
-                state = torch.load(MODEL_SAVE_PATH)
-                model.load_state_dict(state)
-                logging.info(f"Loaded model from {MODEL_SAVE_PATH}")
-            except Exception as e:
-                logging.warning(f"Failed to load model state: {e}")
-                try:
-                    os.remove(MODEL_SAVE_PATH)
-                    logging.info("Removed corrupt model file.")
-                except:
-                    pass
-        else:
-            logging.warning("Invalid model file header; removing file.")
-            try:
-                os.remove(MODEL_SAVE_PATH)
-                logging.info("Removed corrupt model file.")
-            except:
-                pass
 
     # Training loop with early stopping
     best_val_loss = float('inf')
@@ -211,21 +172,15 @@ def main():
         # LR scheduler step
         scheduler.step(avg_val_loss)
 
-        # Early stopping and checkpointing
+        # Early stopping check (without saving the model)
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
-            logging.info(f"Saved best model to {MODEL_SAVE_PATH}")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= EARLY_STOPPING_PATIENCE:
                 logging.info("Early stopping triggered.")
                 break
-
-        # Epoch checkpoint
-        cp_path = os.path.join(CHECKPOINT_DIR, f"checkpoint_epoch_{epoch+1}.pth")
-        torch.save(model.state_dict(), cp_path)
 
     writer.close()
     logging.info("Training complete.")
