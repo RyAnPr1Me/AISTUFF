@@ -83,6 +83,9 @@ class MultimodalStockPredictor(nn.Module):
         self.use_attention_fusion = use_attention_fusion
         self.use_residual_fusion = use_residual_fusion
 
+        # --- Fix: Always define attn_fusion (legacy/optional) ---
+        self.attn_fusion = None
+
         # Optional: Audio encoder
         self.use_audio = use_audio
         if use_audio and audio_dim is not None:
