@@ -1,99 +1,57 @@
-import os
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-import talib as ta
 
-#========================================================================
-# Script: generate_stock_dataset.py
-# Purpose: Download historical stock data for multiple tickers
-#          Generate advanced features and weekly movement labels
-#          Save per-ticker CSVs named data3.csv, data4.csv, ... into Training_Data
-# Usage: python generate_stock_dataset.py
-# Dependencies:
-#   pip install yfinance pandas numpy scikit-learn TA-Lib
-#========================================================================
+# Fetch data for a stock symbol (e.g., 'AAPL')
+symbol = 'AAPL'
+start_date = '2015-01-01'
+end_date = '2025-01-01'
+data = yf.download(symbol, start=start_date, end=end_date)
 
-# Configuration
-TICKERS = [
-    'AAPL', 'MSFT', 'GOOG', 'AMZN', 'TSLA', 'NVDA', 'META', 'JPM', 'V', 'JNJ'
-    # extend this list as needed
-]
-START_DATE = '2015-01-01'
-END_DATE = '2025-01-01'
-OUTPUT_DIR = 'Training_Data'
-START_INDEX = 3  # filenames will start at data3.csv
+# Feature engineering: Adding technical indicators
 
-# Feature windows
-LAG_DAYS = [1, 2, 3, 5, 7]
-ROLLING_WINDOWS = [5, 10, 20]
+# Simple Moving Averages
+data['SMA_5'] = data['Close'].rolling(window=5).mean()  # 5-day simple moving average
+data['SMA_30'] = data['Close'].rolling(window=30).mean()  # 30-day simple moving average
 
-# Ensure output directory exists
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# Relative Strength Index (RSI)
+delta = data['Close'].diff()
+gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+rs = gain / loss
+data['RSI'] = 100 - (100 / (1 + rs))
 
-# Iterate tickers and process individually
-for idx, ticker in enumerate(TICKERS, start=START_INDEX):
-    print(f"Processing {ticker}, writing to data{idx}.csv...")
-    df = yf.download(ticker, start=START_DATE, end=END_DATE)
-    if df.empty:
-        print(f"Warning: No data for {ticker}")
-        continue
+# MACD (Moving Average Convergence Divergence)
+data['EMA_12'] = data['Close'].ewm(span=12, adjust=False).mean()  # 12-day Exponential Moving Average
+data['EMA_26'] = data['Close'].ewm(span=26, adjust=False).mean()  # 26-day Exponential Moving Average
+data['MACD'] = data['EMA_12'] - data['EMA_26']  # MACD line
+data['MACD_signal'] = data['MACD'].ewm(span=9, adjust=False).mean()  # Signal line
 
-    # Price-based features
-    df['Return'] = df['Close'].pct_change()
-    for lag in LAG_DAYS:
-        df[f'Return_Lag_{lag}'] = df['Return'].shift(lag)
+# ATR (Average True Range)
+data['H-L'] = data['High'] - data['Low']
+data['H-PC'] = abs(data['High'] - data['Close'].shift(1))
+data['L-PC'] = abs(data['Low'] - data['Close'].shift(1))
+data['TR'] = data[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+data['ATR'] = data['TR'].rolling(window=14).mean()
 
-    # Rolling volatility
-    for w in ROLLING_WINDOWS:
-        df[f'Volatility_{w}'] = df['Return'].rolling(window=w).std()
+# Target variable: Weekly price change
+data['Weekly_Close'] = data['Close'].shift(-5)  # Close price 5 days ahead
+data['Weekly_Return'] = (data['Weekly_Close'] - data['Close']) / data['Close']  # Percentage change
 
-    # Moving averages and EMA
-    df['SMA_5'] = ta.SMA(df['Close'], timeperiod=5)
-    df['SMA_20'] = ta.SMA(df['Close'], timeperiod=20)
-    df['EMA_5'] = ta.EMA(df['Close'], timeperiod=5)
-    df['EMA_20'] = ta.EMA(df['Close'], timeperiod=20)
+# Labeling the target (binary classification: up or down)
+data['Target'] = np.where(data['Weekly_Return'] > 0, 1, 0)  # 1 = price goes up, 0 = price goes down
 
-    # Bollinger Bands
-    upper, mid, lower = ta.BBANDS(df['Close'], timeperiod=20)
-    df['BB_upper'] = upper
-    df['BB_mid'] = mid
-    df['BB_lower'] = lower
+# Drop rows with missing values (caused by technical indicators and shifting)
+data.dropna(inplace=True)
 
-    # Technical indicators
-    df['RSI'] = ta.RSI(df['Close'], timeperiod=14)
-    macd, macd_signal, _ = ta.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
-    df['MACD'] = macd
-    df['MACD_signal'] = macd_signal
-    df['ATR'] = ta.ATR(df['High'], df['Low'], df['Close'], timeperiod=14)
-    df['OBV'] = ta.OBV(df['Close'], df['Volume'])
+# Select features and scale them
+features = ['Close', 'SMA_5', 'SMA_30', 'RSI', 'MACD', 'MACD_signal', 'ATR']
+scaler = StandardScaler()
+data[features] = scaler.fit_transform(data[features])
 
-    # Date features
-    df['DayOfWeek'] = df.index.dayofweek
-    df['Month'] = df.index.month
-    df['Week'] = df.index.isocalendar().week
+# Save the dataset to a CSV file
+data.to_csv('Training_Data/data3.csv')
 
-    # Weekly target label
-    df['Weekly_Close'] = df['Close'].shift(-5)
-    df['Weekly_Return'] = (df['Weekly_Close'] - df['Close']) / df['Close']
-    df['Target'] = np.where(df['Weekly_Return'] > 0, 1, 0)
-
-    # Drop rows with NaNs
-    df.dropna(inplace=True)
-
-    # Scale numeric features
-    feature_cols = [col for col in df.columns
-                    if col.startswith(('Return_Lag', 'Volatility', 'SMA', 'EMA', 'BB_', 'RSI', 'MACD', 'ATR', 'OBV'))]
-    scaler = StandardScaler()
-    df[feature_cols] = scaler.fit_transform(df[feature_cols])
-
-    # Add ticker column
-    df['Ticker'] = ticker
-
-    # Select columns to save
-    save_cols = ['Ticker'] + feature_cols + ['DayOfWeek', 'Month', 'Week', 'Target']
-    output_path = os.path.join(OUTPUT_DIR, f"data{idx}.csv")
-    df[save_cols].to_csv(output_path, index=False)
-
-print("All datasets generated in Training_Data folder.")
+# Display the first few rows of the dataset
+print(data.head())
