@@ -1,70 +1,61 @@
-import yfinance as yf
+import os
 import pandas as pd
 import numpy as np
-import os
+import yfinance as yf
 from sklearn.preprocessing import StandardScaler
 
-# ========== CONFIG ==========
-SYMBOL = 'AAPL'
-START_DATE = '2015-01-01'
-END_DATE = '2025-01-01'
-OUTPUT_DIR = 'Training_Data'
-FEATURES = ['Close', 'SMA_5', 'SMA_30', 'RSI', 'MACD', 'ATR']
-TARGET_SHIFT_DAYS = 5
+# Stock info
+symbol = 'AAPL'
+start_date = '2015-01-01'
+end_date = '2025-01-01'
 
-# ========== SETUP ==========
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+print(f"[*] Downloading {symbol} data from {start_date} to {end_date}...")
+data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=True)
 
-# ========== DOWNLOAD DATA ==========
-print(f"[*] Downloading {SYMBOL} data from {START_DATE} to {END_DATE}...")
-data = yf.download(SYMBOL, start=START_DATE, end=END_DATE, auto_adjust=True)
+# Check if data downloaded
+if data.empty:
+    raise ValueError("Stock data download failed!")
 
-if data.empty or len(data) < 50:
-    raise ValueError("Not enough data fetched. Try another symbol or date range.")
-
-# ========== CALCULATE INDICATORS ==========
+# Technical indicators (DIY style)
 data['SMA_5'] = data['Close'].rolling(window=5).mean()
 data['SMA_30'] = data['Close'].rolling(window=30).mean()
-
+data['EMA_12'] = data['Close'].ewm(span=12, adjust=False).mean()
+data['EMA_26'] = data['Close'].ewm(span=26, adjust=False).mean()
+data['MACD'] = data['EMA_12'] - data['EMA_26']
 delta = data['Close'].diff()
-gain = delta.clip(lower=0)
-loss = -delta.clip(upper=0)
-avg_gain = gain.rolling(window=14).mean()
-avg_loss = loss.rolling(window=14).mean()
-rs = avg_gain / (avg_loss + 1e-10)
+gain = np.where(delta > 0, delta, 0)
+loss = np.where(delta < 0, -delta, 0)
+avg_gain = pd.Series(gain).rolling(window=14).mean()
+avg_loss = pd.Series(loss).rolling(window=14).mean()
+rs = avg_gain / avg_loss
 data['RSI'] = 100 - (100 / (1 + rs))
 
-ema_12 = data['Close'].ewm(span=12, adjust=False).mean()
-ema_26 = data['Close'].ewm(span=26, adjust=False).mean()
-data['MACD'] = ema_12 - ema_26
+# Target: Future weekly close
+data['Future_Close'] = data['Close'].shift(-5)
+data = data.dropna(subset=['Future_Close'])
 
-high_low = data['High'] - data['Low']
-high_close = np.abs(data['High'] - data['Close'].shift())
-low_close = np.abs(data['Low'] - data['Close'].shift())
-tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-data['ATR'] = tr.rolling(window=14).mean()
-
-# ========== TARGET RETURN ==========
-data['Future_Close'] = data['Close'].shift(-TARGET_SHIFT_DAYS)
+# Weekly return and target class
 data['Weekly_Return'] = (data['Future_Close'] - data['Close']) / data['Close']
-data['Target'] = (data['Weekly_Return'] > 0).astype(int)
+data['Target'] = np.where(data['Weekly_Return'] > 0, 1, 0)
 
-# ========== CLEAN & SCALE ==========
-required_cols = FEATURES + ['Weekly_Return', 'Target']
-data.dropna(subset=required_cols, inplace=True)
+# Feature selection
+features = ['Close', 'SMA_5', 'SMA_30', 'MACD', 'RSI']
+data.dropna(subset=features, inplace=True)
 
-if data.empty:
-    raise ValueError("All rows dropped during cleaning. Adjust your window sizes or date range.")
-
+# Normalize features
 scaler = StandardScaler()
-data[FEATURES] = scaler.fit_transform(data[FEATURES])
+data[features] = scaler.fit_transform(data[features])
 
-# ========== EXPORT ==========
-existing_files = [f for f in os.listdir(OUTPUT_DIR) if f.startswith('data') and f.endswith('.csv')]
-existing_nums = [int(f[4:-4]) for f in existing_files if f[4:-4].isdigit()]
-next_num = max([2] + existing_nums) + 1
-file_path = os.path.join(OUTPUT_DIR, f'data{next_num}.csv')
+# Create training data folder if it doesn't exist
+output_dir = 'Training_Data'
+os.makedirs(output_dir, exist_ok=True)
 
-data_to_save = data[FEATURES + ['Target']].copy()
-data_to_save.to_csv(file_path, index=False)
-print(f"[+] Dataset saved to {file_path} — it’s cleaner than your search history.")
+# Find next filename (start at data3.csv)
+existing = [int(f[4:-4]) for f in os.listdir(output_dir) if f.startswith("data") and f.endswith(".csv") and f[4:-4].isdigit()]
+next_index = max(existing) + 1 if existing else 3
+filename = f"data{next_index}.csv"
+filepath = os.path.join(output_dir, filename)
+
+# Save it
+data.to_csv(filepath, index=False)
+print(f"[+] Dataset saved to {filepath}")
