@@ -13,7 +13,7 @@ MODEL_SAVE_PATH = "trained_model/model_weights.pth"
 # Parameters
 BATCH_SIZE = 8
 EPOCHS = 5
-LR = 1e-5  # Reduced learning rate
+LR = 1e-4
 TEXT_MODEL_NAME = "bert-large-uncased"
 TABULAR_DIM = 64  # Change this value if needed
 
@@ -38,11 +38,6 @@ class StockDataset(Dataset):
 def main():
     print(f"Loading validated data from {VALIDATED_DATA_PATH}")
     data = pd.read_csv(VALIDATED_DATA_PATH)
-
-    # Check if the data contains NaN values in essential columns
-    if data.isnull().any().any():
-        print("[ERROR] Data contains NaN values!")
-        exit(1)
 
     # Tokenize text with attention mask
     tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
@@ -95,6 +90,16 @@ def main():
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
 
+    # Load model if it exists to resume training
+    if os.path.exists(MODEL_SAVE_PATH):
+        model.load_state_dict(torch.load(MODEL_SAVE_PATH))
+        print(f"Model loaded from {MODEL_SAVE_PATH}")
+    else:
+        print("No previous model found, starting from scratch.")
+
+    # Track best validation loss
+    best_val_loss = float('inf')
+
     # Training loop
     print("Starting training...")
     model.train()
@@ -111,10 +116,6 @@ def main():
             )
             loss = loss_fn(logits, batch["label"])
             loss.backward()
-
-            # Gradient clipping to avoid exploding gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
             optimizer.step()
             train_loss += loss.item()
 
@@ -136,12 +137,19 @@ def main():
                 val_loss += loss.item()
 
         print(f"Epoch {epoch + 1}/{EPOCHS} Validation Loss: {val_loss / len(val_loader)}")
+        
+        # Save model only if validation loss improves
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), MODEL_SAVE_PATH)  # Save only if improvement
+            print(f"Model saved (improved validation loss): {MODEL_SAVE_PATH}")
+
         model.train()
 
-    # Save model
+    # Save the model at the end as a final checkpoint
     os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
-    print(f"Model saved to {MODEL_SAVE_PATH}")
+    print(f"Final model saved to {MODEL_SAVE_PATH}")
 
 if __name__ == "__main__":
     main()
