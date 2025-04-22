@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore")
+
 import os
 import torch
 import pandas as pd
@@ -15,6 +18,7 @@ from tqdm import tqdm
 #========================================================================
 # Train Model Script with Performance Optimizations
 #========================================================================
+
 
 # Paths (removed saving paths)
 VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
