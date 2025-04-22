@@ -1,4 +1,12 @@
+import torch
+import torch.nn as nn
+from transformers import AutoModel, AutoConfig
+from .fusion import GatedFusion, CrossModalAttention
+from .audio_encoder import AudioEncoder
+from .time_series_encoder import TimeSeriesEncoder
+from .interpretability import compute_feature_importance
 
+class MultimodalStockPredictor(nn.Module):
     def __init__(self, 
                  text_model_name="bert-large-uncased",
                  vision_model_name=None,
