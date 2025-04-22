@@ -13,7 +13,7 @@ MODEL_SAVE_PATH = "trained_model/model_weights.pth"
 # Parameters
 BATCH_SIZE = 8
 EPOCHS = 5
-LR = 1e-4
+LR = 1e-5  # Reduced learning rate
 TEXT_MODEL_NAME = "bert-large-uncased"
 TABULAR_DIM = 64  # Change this value if needed
 
@@ -38,6 +38,11 @@ class StockDataset(Dataset):
 def main():
     print(f"Loading validated data from {VALIDATED_DATA_PATH}")
     data = pd.read_csv(VALIDATED_DATA_PATH)
+
+    # Check if the data contains NaN values in essential columns
+    if data.isnull().any().any():
+        print("[ERROR] Data contains NaN values!")
+        exit(1)
 
     # Tokenize text with attention mask
     tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
@@ -106,6 +111,10 @@ def main():
             )
             loss = loss_fn(logits, batch["label"])
             loss.backward()
+
+            # Gradient clipping to avoid exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             optimizer.step()
             train_loss += loss.item()
 
@@ -136,5 +145,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
