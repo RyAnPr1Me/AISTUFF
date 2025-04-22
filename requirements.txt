@@ -11,3 +11,4 @@ tensorboard
 yfinance
 TA-Lib
 scikit-learn
+
