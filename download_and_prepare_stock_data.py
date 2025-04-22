@@ -1,3 +1,7 @@
+# --- Ticker configuration section ---
+TICKER = "SMCI"  # <--- Set your desired ticker here (overrides --symbol if not None)
+# ------------------------------------
+
 import os
 import sys
 import argparse
@@ -76,6 +80,25 @@ def get_next_data_filename(folder):
             return fpath
         i += 1
 
+def add_text_column(df, symbol):
+    """
+    Add a 'text' column for compatibility with the data validator.
+    Uses a template string with the date and symbol.
+    """
+    if 'text' not in df.columns:
+        # Try to use 'Date' if present, else index
+        if 'Date' in df.columns:
+            date_col = df['Date'].astype(str)
+        else:
+            date_col = df.index.astype(str)
+        # Compose a simple text headline for each row
+        df['text'] = (
+            symbol.upper() + " stock data for " + date_col +
+            ". Close: " + df['Close'].round(2).astype(str) +
+            ", Weekly return: " + df['Weekly_Return'].round(4).astype(str)
+        )
+    return df
+
 def main():
     setup_logging()
     parser = argparse.ArgumentParser(description="Download and prepare stock data for training.")
@@ -85,11 +108,14 @@ def main():
     parser.add_argument('--output-dir', type=str, default='Training_Data', help='Output folder')
     args = parser.parse_args()
 
+    # Use TICKER variable if set (not None or empty)
+    symbol = TICKER if TICKER else args.symbol
+
     os.makedirs(args.output_dir, exist_ok=True)
 
-    logging.info(f"Downloading {args.symbol} data from {args.start} to {args.end}...")
+    logging.info(f"Downloading {symbol} data from {args.start} to {args.end}...")
     try:
-        df = yf.download(args.symbol, start=args.start, end=args.end)
+        df = yf.download(symbol, start=args.start, end=args.end)
     except Exception as e:
         logging.error(f"Failed to download data: {e}")
         sys.exit(1)
@@ -120,6 +146,13 @@ def main():
 
     # Normalize features
     df_scaled = normalize_features(df, feature_cols)
+
+    # Add a 'text' column for compatibility with the data validator
+    df_scaled = add_text_column(df_scaled, args.symbol)
+
+    # Reorder columns: text, features..., label
+    ordered_cols = ['text'] + [c for c in df_scaled.columns if c not in ['text', 'label']] + ['label']
+    df_scaled = df_scaled[ordered_cols]
 
     # Save to CSV
     out_path = get_next_data_filename(args.output_dir)

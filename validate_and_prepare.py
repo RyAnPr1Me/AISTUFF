@@ -18,6 +18,78 @@ def setup_logging():
     )
 
 
+def try_format_dataframe(df, required_columns):
+    """
+    Attempt to coerce/format a DataFrame to the expected format:
+    - Try to extract or combine columns for 'text' and 'label'
+    - Try to infer label from other columns if not present
+    - Try to create a 'text' column from multiple possible text fields
+    - Lowercase all column names for easier matching
+    - Remove columns with all NaN or empty values
+    Returns a new DataFrame or None if not possible.
+    """
+    df = df.copy()
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    # Remove all-NaN columns
+    df = df.dropna(axis=1, how='all')
+    # Try to create 'text'
+    if 'text' not in df.columns:
+        text_candidates = ['headline', 'news', 'sentence', 'content', 'body', 'title', 'summary']
+        for c in text_candidates:
+            if c in df.columns:
+                df['text'] = df[c]
+                break
+        # Try to combine multiple text fields if possible
+        if 'text' not in df.columns:
+            combos = [c for c in text_candidates if c in df.columns]
+            if combos:
+                df['text'] = df[combos].astype(str).agg(' '.join, axis=1)
+    # Try to create 'label'
+    if 'label' not in df.columns:
+        label_candidates = ['target', 'class', 'y', 'output']
+        for c in label_candidates:
+            if c in df.columns:
+                df['label'] = df[c]
+                break
+        # Try to infer label from price/return columns
+        if 'label' not in df.columns:
+            # If there is a 'weekly_return' or similar, use it
+            for c in df.columns:
+                if 'return' in c:
+                    df['label'] = (df[c] > 0).astype(int)
+                    break
+            # If there is a 'future_close' and 'close', use them
+            if 'label' not in df.columns and 'future_close' in df.columns and 'close' in df.columns:
+                df['label'] = (df['future_close'] > df['close']).astype(int)
+    # Only keep required columns and any feature columns
+    keep = []
+    for col in required_columns:
+        if col in df.columns:
+            keep.append(col)
+    # Add feature columns (those starting with 'feature_' or technical indicators)
+    feature_cols = [c for c in df.columns if c.startswith('feature_') or c in [
+        'open', 'high', 'low', 'close', 'volume',
+        'sma_5', 'sma_30', 'ema_12', 'ema_26', 'macd',
+        'rsi_14', 'bb_upper', 'bb_lower', 'stoch_%k', 'stoch_%d',
+        'close_lag1', 'close_lag5'
+    ]]
+    for c in feature_cols:
+        if c not in keep:
+            keep.append(c)
+    # Add 'date' if present
+    if 'date' in df.columns and 'date' not in keep:
+        keep.append('date')
+    # Remove duplicates in keep
+    keep = list(dict.fromkeys(keep))
+    if not keep:
+        return None
+    df = df[keep]
+    # Rename columns to standard names
+    rename_map = {c: c.lower() for c in df.columns}
+    df = df.rename(columns=rename_map)
+    return df
+
+
 def validate_and_clean(df: pd.DataFrame,
                        required_columns: list,
                        tokenizer: AutoTokenizer) -> pd.DataFrame:
@@ -38,8 +110,8 @@ def validate_and_clean(df: pd.DataFrame,
     col_map = {c.lower(): c for c in df.columns}
     required_map = {}
     synonyms = {
-        'text': ['text', 'headline', 'news', 'sentence', 'content', 'body'],
-        'label': ['label', 'target', 'class', 'y'],
+        'text': ['text', 'headline', 'news', 'sentence', 'content', 'body', 'title', 'summary'],
+        'label': ['label', 'target', 'class', 'y', 'output'],
     }
     for req in required_columns:
         found = None
@@ -55,8 +127,14 @@ def validate_and_clean(df: pd.DataFrame,
         if found:
             required_map[req] = found
         else:
-            logging.error(f"Missing required column (or synonym): '{req}'")
-            return None
+            # Try to format the DataFrame to create the required column
+            logging.warning(f"Column '{req}' not found, attempting to format DataFrame...")
+            df = try_format_dataframe(df, required_columns)
+            if df is not None and req in df.columns:
+                required_map[req] = req
+            else:
+                logging.error(f"Missing required column (or synonym): '{req}' after attempted formatting.")
+                return None
 
     # Rename columns to standard names for downstream processing
     df = df.rename(columns={v: k for k, v in required_map.items()})
@@ -151,7 +229,81 @@ def main():
         '--columns', nargs='+', default=['text', 'label'],
         help='List of required columns in each CSV'
     )
+    # --- New: Option to download and process stock data for a given ticker ---
+    parser.add_argument(
+        '--download-ticker', type=str, default=None,
+        help='If set, download stock data for this ticker and create a dataset (CSV) in data-dir'
+    )
+    parser.add_argument(
+        '--start', type=str, default='2015-01-01',
+        help='Start date for stock data download (YYYY-MM-DD)'
+    )
+    parser.add_argument(
+        '--end', type=str, default='2025-01-01',
+        help='End date for stock data download (YYYY-MM-DD)'
+    )
     args = parser.parse_args()
+
+    # --- New: Download and prepare stock data if requested ---
+    if args.download_ticker:
+        import yfinance as yf
+        from sklearn.preprocessing import StandardScaler
+
+        logging.info(f"Downloading {args.download_ticker} data from {args.start} to {args.end}...")
+        df = yf.download(args.download_ticker, start=args.start, end=args.end)
+        if df.empty:
+            logging.error("No data downloaded. Check ticker and date range.")
+            sys.exit(1)
+        df = df.reset_index()
+
+        # Compute technical indicators (same as in download_and_prepare_stock_data.py)
+        # ...SMA, EMA, MACD, RSI, Bollinger Bands, Stochastic Oscillator, lags...
+        df['SMA_5'] = df['Close'].rolling(window=5).mean()
+        df['SMA_30'] = df['Close'].rolling(window=30).mean()
+        df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+        df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+        df['MACD'] = df['EMA_12'] - df['EMA_26']
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / (loss + 1e-10)
+        df['RSI_14'] = 100 - (100 / (1 + rs))
+        ma20 = df['Close'].rolling(window=20).mean()
+        std20 = df['Close'].rolling(window=20).std()
+        df['BB_upper'] = ma20 + 2 * std20
+        df['BB_lower'] = ma20 - 2 * std20
+        low14 = df['Low'].rolling(window=14).min()
+        high14 = df['High'].rolling(window=14).max()
+        df['Stoch_%K'] = 100 * (df['Close'] - low14) / (high14 - low14 + 1e-10)
+        df['Stoch_%D'] = df['Stoch_%K'].rolling(window=3).mean()
+        df['Close_lag1'] = df['Close'].shift(1)
+        df['Close_lag5'] = df['Close'].shift(5)
+        # Targets
+        df['Future_Close'] = df['Close'].shift(-5)
+        close = df['Close']
+        future_close = df['Future_Close']
+        df['Weekly_Return'] = (future_close - close) / close
+        df['label'] = (df['Weekly_Return'] > 0).astype(int)
+        # Features/columns
+        feature_cols = [
+            'Open', 'High', 'Low', 'Close', 'Volume',
+            'SMA_5', 'SMA_30', 'EMA_12', 'EMA_26', 'MACD',
+            'RSI_14', 'BB_upper', 'BB_lower',
+            'Stoch_%K', 'Stoch_%D',
+            'Close_lag1', 'Close_lag5'
+        ]
+        keep_cols = ['Date'] + feature_cols + ['Future_Close', 'Weekly_Return', 'label']
+        df = df[keep_cols].dropna().reset_index(drop=True)
+        if df.empty:
+            logging.error("No data left after dropping rows with missing values.")
+            sys.exit(1)
+        # Normalize features
+        scaler = StandardScaler()
+        df[feature_cols] = scaler.fit_transform(df[feature_cols])
+        # Save to CSV in data-dir
+        out_path = os.path.join(args.data_dir, f"{args.download_ticker}_data.csv")
+        df.to_csv(out_path, index=False)
+        logging.info(f"Saved downloaded and processed data to {out_path} ({len(df)} rows).")
 
     if not os.path.isdir(args.data_dir):
         logging.error(f"Directory not found: {args.data_dir}")
