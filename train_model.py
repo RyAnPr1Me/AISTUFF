@@ -1,7 +1,10 @@
+import os
+os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "0"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
+
 import warnings
 warnings.filterwarnings("ignore")
 
-import os
 import torch
 import pandas as pd
 import logging
