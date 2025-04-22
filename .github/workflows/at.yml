@@ -48,5 +48,5 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          echo "$HF_TOKEN" | huggingface-cli login --stdin
+          huggingface-cli login --token $HF_TOKEN
           huggingface-cli upload rmanzo28/Stockai trained_model/model_weights.pth
