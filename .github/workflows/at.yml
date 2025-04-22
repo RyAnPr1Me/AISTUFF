@@ -3,8 +3,8 @@ name: Train AI on New Data
 on:
   push:
     paths:
-      - 'Training_Data/**'  # Trigger whenever new files are added to the 'Training_Data' folder
-  workflow_dispatch:  # This allows you to manually trigger the workflow
+      - 'Training_Data/**'  # Trigger on changes in Training_Data folder
+  workflow_dispatch:  # Manual trigger option
 
 jobs:
   validate-train:
@@ -26,16 +26,26 @@ jobs:
 
       - name: Validate and Prepare Data
         run: |
-          python validate_and_prepare.py  # Validate and prepare the training data
+          python validate_and_prepare.py
 
       - name: Train AI Model
         run: |
-          python train_model.py  # Train the AI model
+          python train_model.py
 
       - name: Save Trained Model
         run: |
           mkdir -p trained_model
-          mv model_weights.pth trained_model/  # Move the model weights to 'trained_model/'
+          # model_weights.pth is already saved by the script, ensure it's there
+          if [ ! -f "trained_model/model_weights.pth" ]; then
+            echo "Training did not produce model_weights.pth" >&2
+            exit 1
+          fi
+
+      - name: Upload model weights
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-weights
+          path: trained_model/model_weights.pth
 
       - name: Commit Trained Model
         uses: EndBug/add-and-commit@v7
@@ -43,4 +53,4 @@ jobs:
           author_name: 'GitHub Actions'
           author_email: 'actions@github.com'
           message: 'Updated trained model weights'
-          add: 'trained_model/model_weights.pth'  # Commit the updated model weights
+          add: 'trained_model/model_weights.pth'
