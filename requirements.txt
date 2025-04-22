@@ -8,3 +8,6 @@ tqdm
 pandas  
 hf_xet
 tensorboard
+yfinance
+TA-Lib
+scikit-learn
