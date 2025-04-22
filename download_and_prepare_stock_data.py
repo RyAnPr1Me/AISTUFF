@@ -1,0 +1,134 @@
+import os
+import sys
+import argparse
+import logging
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from sklearn.preprocessing import StandardScaler
+
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(levelname)s] %(message)s'
+    )
+
+def compute_technical_indicators(df):
+    # SMA
+    df['SMA_5'] = df['Close'].rolling(window=5).mean()
+    df['SMA_30'] = df['Close'].rolling(window=30).mean()
+    # EMA
+    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+    # MACD
+    df['MACD'] = df['EMA_12'] - df['EMA_26']
+    # RSI
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / (loss + 1e-10)
+    df['RSI_14'] = 100 - (100 / (1 + rs))
+    # Bollinger Bands
+    ma20 = df['Close'].rolling(window=20).mean()
+    std20 = df['Close'].rolling(window=20).std()
+    df['BB_upper'] = ma20 + 2 * std20
+    df['BB_lower'] = ma20 - 2 * std20
+    # Stochastic Oscillator
+    low14 = df['Low'].rolling(window=14).min()
+    high14 = df['High'].rolling(window=14).max()
+    df['Stoch_%K'] = 100 * (df['Close'] - low14) / (high14 - low14 + 1e-10)
+    df['Stoch_%D'] = df['Stoch_%K'].rolling(window=3).mean()
+    # Lag features
+    df['Close_lag1'] = df['Close'].shift(1)
+    df['Close_lag5'] = df['Close'].shift(5)
+    return df
+
+def create_targets(df):
+    # Future close price (5 days ahead)
+    df['Future_Close'] = df['Close'].shift(-5)
+    # Ensure both are Series, not DataFrames (fix for possible duplicate columns)
+    if isinstance(df['Close'], pd.DataFrame):
+        close = df['Close'].iloc[:, 0]
+    else:
+        close = df['Close']
+    if isinstance(df['Future_Close'], pd.DataFrame):
+        future_close = df['Future_Close'].iloc[:, 0]
+    else:
+        future_close = df['Future_Close']
+    # Weekly return
+    df['Weekly_Return'] = (future_close - close) / close
+    # Target: 1 if up, 0 if down or unchanged
+    df['label'] = (df['Weekly_Return'] > 0).astype(int)
+    return df
+
+def normalize_features(df, feature_cols):
+    scaler = StandardScaler()
+    df_scaled = df.copy()
+    df_scaled[feature_cols] = scaler.fit_transform(df[feature_cols])
+    return df_scaled
+
+def get_next_data_filename(folder):
+    i = 3
+    while True:
+        fname = f"data{i}.csv"
+        fpath = os.path.join(folder, fname)
+        if not os.path.exists(fpath):
+            return fpath
+        i += 1
+
+def main():
+    setup_logging()
+    parser = argparse.ArgumentParser(description="Download and prepare stock data for training.")
+    parser.add_argument('--symbol', type=str, default='AAPL', help='Stock symbol (default: AAPL)')
+    parser.add_argument('--start', type=str, default='2015-01-01', help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end', type=str, default='2025-01-01', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--output-dir', type=str, default='Training_Data', help='Output folder')
+    args = parser.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    logging.info(f"Downloading {args.symbol} data from {args.start} to {args.end}...")
+    try:
+        df = yf.download(args.symbol, start=args.start, end=args.end)
+    except Exception as e:
+        logging.error(f"Failed to download data: {e}")
+        sys.exit(1)
+
+    if df.empty:
+        logging.error("No data downloaded. Check symbol and date range.")
+        sys.exit(1)
+
+    df = df.reset_index()
+    df = compute_technical_indicators(df)
+    df = create_targets(df)
+
+    # Select features and columns to keep
+    feature_cols = [
+        'Open', 'High', 'Low', 'Close', 'Volume',
+        'SMA_5', 'SMA_30', 'EMA_12', 'EMA_26', 'MACD',
+        'RSI_14', 'BB_upper', 'BB_lower',
+        'Stoch_%K', 'Stoch_%D',
+        'Close_lag1', 'Close_lag5'
+    ]
+    keep_cols = ['Date'] + feature_cols + ['Future_Close', 'Weekly_Return', 'label']
+
+    # Drop rows with missing values (from rolling calculations and lags)
+    df = df[keep_cols].dropna().reset_index(drop=True)
+    if df.empty:
+        logging.error("No data left after dropping rows with missing values.")
+        sys.exit(1)
+
+    # Normalize features
+    df_scaled = normalize_features(df, feature_cols)
+
+    # Save to CSV
+    out_path = get_next_data_filename(args.output_dir)
+    try:
+        df_scaled.to_csv(out_path, index=False)
+        logging.info(f"Saved processed data to {out_path} ({len(df_scaled)} rows).")
+    except Exception as e:
+        logging.error(f"Failed to save CSV: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
