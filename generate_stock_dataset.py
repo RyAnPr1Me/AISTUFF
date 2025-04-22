@@ -16,11 +16,8 @@ TARGET_SHIFT_DAYS = 5
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ========== DOWNLOAD DATA ==========
-try:
-    print(f"[*] Downloading {SYMBOL} data from {START_DATE} to {END_DATE}...")
-    data = yf.download(SYMBOL, start=START_DATE, end=END_DATE, auto_adjust=True)
-except Exception as e:
-    raise RuntimeError(f"Failed to download data: {e}")
+print(f"[*] Downloading {SYMBOL} data from {START_DATE} to {END_DATE}...")
+data = yf.download(SYMBOL, start=START_DATE, end=END_DATE, auto_adjust=True)
 
 if data.empty or len(data) < 50:
     raise ValueError("Not enough data fetched. Try another symbol or date range.")
@@ -47,7 +44,7 @@ low_close = np.abs(data['Low'] - data['Close'].shift())
 tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 data['ATR'] = tr.rolling(window=14).mean()
 
-# ========== TARGET CALC ==========
+# ========== TARGET RETURN ==========
 data['Future_Close'] = data['Close'].shift(-TARGET_SHIFT_DAYS)
 data['Weekly_Return'] = (data['Future_Close'] - data['Close']) / data['Close']
 data['Target'] = (data['Weekly_Return'] > 0).astype(int)
@@ -68,8 +65,6 @@ existing_nums = [int(f[4:-4]) for f in existing_files if f[4:-4].isdigit()]
 next_num = max([2] + existing_nums) + 1
 file_path = os.path.join(OUTPUT_DIR, f'data{next_num}.csv')
 
-try:
-    data.to_csv(file_path, index=False)
-    print(f"[+] Dataset saved to {file_path} — go feed this shit to your AI overlord.")
-except Exception as e:
-    raise IOError(f"Failed to save CSV: {e}")
+data_to_save = data[FEATURES + ['Target']].copy()
+data_to_save.to_csv(file_path, index=False)
+print(f"[+] Dataset saved to {file_path} — it’s cleaner than your search history.")
