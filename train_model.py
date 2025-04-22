@@ -39,6 +39,11 @@ def main():
     print(f"Loading validated data from {VALIDATED_DATA_PATH}")
     data = pd.read_csv(VALIDATED_DATA_PATH)
 
+    # Handle NaN values
+    if data.isnull().values.any():
+        print("Warning: Data contains NaN values. Filling NaN values with zeros.")
+        data = data.fillna(0)  # Fill NaN with zero. You can also use mean, median, or other imputation techniques.
+
     # Tokenize text with attention mask
     tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
     encoded = tokenizer(
@@ -153,4 +158,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
