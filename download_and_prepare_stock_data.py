@@ -91,11 +91,18 @@ def add_text_column(df, symbol):
             date_col = df['Date'].astype(str)
         else:
             date_col = df.index.astype(str)
+        # Ensure 'Close' and 'Weekly_Return' are Series, not DataFrames
+        close = df['Close']
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        weekly_return = df['Weekly_Return']
+        if isinstance(weekly_return, pd.DataFrame):
+            weekly_return = weekly_return.iloc[:, 0]
         # Compose a simple text headline for each row
         df['text'] = (
             symbol.upper() + " stock data for " + date_col +
-            ". Close: " + df['Close'].round(2).astype(str) +
-            ", Weekly return: " + df['Weekly_Return'].round(4).astype(str)
+            ". Close: " + close.round(2).astype(str) +
+            ", Weekly return: " + weekly_return.round(4).astype(str)
         )
     return df
 
@@ -125,6 +132,36 @@ def main():
         sys.exit(1)
 
     df = df.reset_index()
+
+    # --- Fix for MultiIndex columns (happens with yfinance multi-ticker download) ---
+    if isinstance(df.columns, pd.MultiIndex):
+        ticker_level = df.columns.get_level_values(1)
+        unique_tickers = list(set(ticker_level))
+        if len(unique_tickers) == 1 and (unique_tickers[0] == '' or unique_tickers[0] == symbol):
+            df.columns = [col[0] for col in df.columns]
+        elif symbol in unique_tickers:
+            df = df.xs(symbol, axis=1, level=1, drop_level=True)
+            df = df.reset_index()
+        else:
+            logging.error(f"MultiIndex columns detected for multiple tickers, and '{symbol}' not found. Please use a single valid ticker.")
+            sys.exit(1)
+    # --- End fix ---
+
+    # --- Fix: Ensure 'Date' column exists and is named correctly ---
+    # After reset_index, the date column may be named 'index' or something else
+    date_col_candidates = ['Date', 'date', 'Datetime', 'datetime', 'index']
+    found_date_col = None
+    for c in date_col_candidates:
+        if c in df.columns:
+            found_date_col = c
+            break
+    if found_date_col and found_date_col != 'Date':
+        df = df.rename(columns={found_date_col: 'Date'})
+    elif not found_date_col:
+        logging.error("No date column found after reset_index. Cannot proceed.")
+        sys.exit(1)
+    # --- End fix ---
+
     df = compute_technical_indicators(df)
     df = create_targets(df)
 
@@ -148,7 +185,7 @@ def main():
     df_scaled = normalize_features(df, feature_cols)
 
     # Add a 'text' column for compatibility with the data validator
-    df_scaled = add_text_column(df_scaled, args.symbol)
+    df_scaled = add_text_column(df_scaled, symbol)
 
     # Reorder columns: text, features..., label
     ordered_cols = ['text'] + [c for c in df_scaled.columns if c not in ['text', 'label']] + ['label']
