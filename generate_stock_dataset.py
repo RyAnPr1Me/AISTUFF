@@ -1,55 +1,55 @@
-import os
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import yfinance as yf
+import os
 from sklearn.preprocessing import StandardScaler
 
-# Create the Training_Data directory if it doesn't exist
-os.makedirs("Training_Data", exist_ok=True)
-
-# Get the next dataset file number
-existing_files = [f for f in os.listdir("Training_Data") if f.startswith("data") and f.endswith(".csv")]
-existing_numbers = [int(f[4:-4]) for f in existing_files if f[4:-4].isdigit()]
-next_num = max(existing_numbers, default=2) + 1  # Start at data3.csv
-
-# Fetch stock data
+# Config
 symbol = 'AAPL'
 start_date = '2015-01-01'
 end_date = '2025-01-01'
-data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=False)
+output_dir = 'Training_Data'
+os.makedirs(output_dir, exist_ok=True)
 
-# Check for required columns
-required_columns = ['Close', 'High', 'Low']
-missing = [col for col in required_columns if col not in data.columns]
-if missing:
-    raise ValueError(f"Missing expected columns: {missing}")
+# Download data
+data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=True)
 
-# Feature engineering (basic, without talib)
+# Technical indicators using just Pandas/NumPy
 data['SMA_5'] = data['Close'].rolling(window=5).mean()
 data['SMA_30'] = data['Close'].rolling(window=30).mean()
-data['RSI'] = 100 - (100 / (1 + data['Close'].pct_change().rolling(14).mean() / data['Close'].pct_change().rolling(14).std()))
-data['ATR'] = (data['High'] - data['Low']).rolling(window=14).mean()
-
-# MACD
+delta = data['Close'].diff()
+gain = delta.clip(lower=0)
+loss = -delta.clip(upper=0)
+avg_gain = gain.rolling(window=14).mean()
+avg_loss = loss.rolling(window=14).mean()
+rs = avg_gain / avg_loss
+data['RSI'] = 100 - (100 / (1 + rs))
 ema_12 = data['Close'].ewm(span=12, adjust=False).mean()
 ema_26 = data['Close'].ewm(span=26, adjust=False).mean()
 data['MACD'] = ema_12 - ema_26
+high_low = data['High'] - data['Low']
+high_close = np.abs(data['High'] - data['Close'].shift())
+low_close = np.abs(data['Low'] - data['Close'].shift())
+tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+data['ATR'] = tr.rolling(window=14).mean()
 
-# Create the target: will price go up in the next week?
+# Target: Weekly return
 data['Weekly_Close'] = data['Close'].shift(-5)
+data.dropna(subset=['Weekly_Close'], inplace=True)
 data['Weekly_Return'] = (data['Weekly_Close'] - data['Close']) / data['Close']
 data['Target'] = np.where(data['Weekly_Return'] > 0, 1, 0)
 
-# Drop rows with NaNs
-data.dropna(inplace=True)
-
-# Scale features
+# Clean and scale
 features = ['Close', 'SMA_5', 'SMA_30', 'RSI', 'MACD', 'ATR']
+data.dropna(subset=features + ['Target'], inplace=True)
 scaler = StandardScaler()
 data[features] = scaler.fit_transform(data[features])
 
-# Save the cleaned, feature-enriched dataset
-output_file = f"Training_Data/data{next_num}.csv"
-data.to_csv(output_file, index=False)
+# Save to next available file (data3.csv onward)
+existing_files = [f for f in os.listdir(output_dir) if f.startswith('data') and f.endswith('.csv')]
+existing_nums = [int(f[4:-4]) for f in existing_files if f[4:-4].isdigit()]
+next_num = max([2] + existing_nums) + 1
+file_path = os.path.join(output_dir, f'data{next_num}.csv')
+data.to_csv(file_path, index=False)
 
-print(f"🔥 Dataset saved to {output_file}")
+print(f"[+] Dataset saved to {file_path} — enjoy your AI stock overlord.")
