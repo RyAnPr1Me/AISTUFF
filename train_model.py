@@ -1,5 +1,4 @@
 import os
-import sys
 import torch
 import pandas as pd
 import logging
@@ -14,7 +13,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from tqdm import tqdm
 
 #========================================================================
-# Train Model Script without saving to local disk
+# Train Model Script with Performance Optimizations
 #========================================================================
 
 # Paths (removed saving paths)
@@ -22,11 +21,12 @@ VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
 
 # Training parameters
 BATCH_SIZE = 8
-EPOCHS = 50
+EPOCHS = 5  # Reduced for faster testing
 LR = 1e-4
 TEXT_MODEL_NAME = "bert-base-uncased"
 TABULAR_DIM = 64
 EARLY_STOPPING_PATIENCE = 5
+MAX_SEQ_LEN = 128  # Max sequence length for text
 
 # Logging setup
 def setup_logging():
@@ -35,19 +35,28 @@ def setup_logging():
 
 # Dataset class
 class StockDataset(Dataset):
-    def __init__(self, input_ids, attention_mask, tabular_data, labels):
-        self.input_ids = input_ids
-        self.attention_mask = attention_mask
+    def __init__(self, texts, tabular_data, labels, tokenizer, max_len=MAX_SEQ_LEN):
+        self.tokenizer = tokenizer
+        self.texts = texts
         self.tabular_data = tabular_data
         self.labels = labels
+        self.max_len = max_len
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
+        # Tokenize the text on the fly
+        encoded = self.tokenizer(
+            self.texts[idx],
+            padding='max_length',
+            truncation=True,
+            max_length=self.max_len,
+            return_tensors='pt'
+        )
         return {
-            "input_ids": self.input_ids[idx],
-            "attention_mask": self.attention_mask[idx],
+            "input_ids": encoded["input_ids"].squeeze(0),
+            "attention_mask": encoded["attention_mask"].squeeze(0),
             "tabular": self.tabular_data[idx],
             "label": self.labels[idx]
         }
@@ -65,11 +74,8 @@ def main():
         logging.warning("Data contains NaN values; filling with zeros.")
         data = data.fillna(0)
 
-    # Tokenize text
+    # Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
-    encoded = tokenizer(list(data["text"]), padding=True, truncation=True, return_tensors="pt")
-    input_ids = encoded["input_ids"]
-    attention_mask = encoded["attention_mask"]
 
     # Process tabular features
     if 'feature_0' not in data.columns:
@@ -86,22 +92,26 @@ def main():
 
     labels = torch.tensor(data["label"].values, dtype=torch.long)
 
-    # Split data
-    (X_ids_train, X_ids_val,
-     X_mask_train, X_mask_val,
-     t_train, t_val,
-     y_train, y_val) = train_test_split(
-        input_ids, attention_mask, tabular_data, labels,
-        test_size=0.2, random_state=42
+    # Split data (combine splitting and dataset creation)
+    X_text = list(data["text"])
+    X_tab = tabular_data
+    y = labels
+
+    X_text_train, X_text_val, X_tab_train, X_tab_val, y_train, y_val = train_test_split(
+        X_text, X_tab, y, test_size=0.2, random_state=42
     )
 
-    train_ds = StockDataset(X_ids_train, X_mask_train, t_train, y_train)
-    val_ds = StockDataset(X_ids_val, X_mask_val, t_val, y_val)
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, pin_memory=True)
+    train_ds = StockDataset(X_text_train, X_tab_train, y_train, tokenizer)
+    val_ds = StockDataset(X_text_val, X_tab_val, y_val, tokenizer)
+
+    # DataLoader with parallelism and persistent workers
+    num_workers = os.cpu_count() or 2
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=num_workers, persistent_workers=True)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=num_workers, persistent_workers=True)
 
     # Initialize model, loss, optimizer, scheduler
     model = MultimodalStockPredictor(tabular_dim=TABULAR_DIM).to(device)
+    model = torch.compile(model)  # PyTorch 2.x optimization
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2, factor=0.5)
@@ -172,7 +182,7 @@ def main():
         # LR scheduler step
         scheduler.step(avg_val_loss)
 
-        # Early stopping check (without saving the model)
+        # Early stopping check
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             epochs_no_improve = 0
