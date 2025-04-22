@@ -3,7 +3,7 @@ name: Train AI on New Data
 on:
   push:
     paths:
-      - 'Training_Data/**'  # Trigger on changes in Training_Data folder
+      - 'Training_Data/**'  # Trigger on any new or modified files in the Training_Data folder
   workflow_dispatch:  # Manual trigger option
 
 jobs:
@@ -35,22 +35,18 @@ jobs:
       - name: Save Trained Model
         run: |
           mkdir -p trained_model
-          # model_weights.pth is already saved by the script, ensure it's there
           if [ ! -f "trained_model/model_weights.pth" ]; then
             echo "Training did not produce model_weights.pth" >&2
             exit 1
           fi
 
-      - name: Upload model weights
-        uses: actions/upload-artifact@v4
-        with:
-          name: model-weights
-          path: trained_model/model_weights.pth
+      - name: Install Hugging Face Hub CLI
+        run: |
+          pip install huggingface-hub
 
-      - name: Commit Trained Model
-        uses: EndBug/add-and-commit@v7
-        with:
-          author_name: 'GitHub Actions'
-          author_email: 'actions@github.com'
-          message: 'Updated trained model weights'
-          add: 'trained_model/model_weights.pth'
+      - name: Upload model weights to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          echo "$HF_TOKEN" | huggingface-cli login --stdin
+          huggingface-cli upload rmanzo28/Stockai trained_model/model_weights.pth
