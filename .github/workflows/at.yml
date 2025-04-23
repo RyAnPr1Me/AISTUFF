@@ -67,6 +67,9 @@ jobs:
           kaggle datasets create -p kaggle_dataset --dir-mode zip
 
       - name: Push Kernel to Kaggle
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
           mkdir -p kaggle_kernel
           cp train_model.py kaggle_kernel/
@@ -81,7 +84,8 @@ jobs:
             \"enable_gpu\": true,
             \"dataset_sources\": [\"ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP\"]
           }" > kaggle_kernel/kernel-metadata.json
-          kaggle kernels push -p kaggle_kernel
+          cat kaggle_kernel/kernel-metadata.json  # Debug: show metadata file
+          kaggle kernels push -p kaggle_kernel || (cat kaggle_kernel/kernel-metadata.json && exit 1)
 
       - name: Wait for Kernel Execution
         run: |
