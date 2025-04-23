@@ -25,7 +25,7 @@ from tqdm import tqdm
 VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
 
 # Training parameters
-BATCH_SIZE = 8
+BATCH_SIZE = 32
 EPOCHS = 5  # Reduced for faster testing
 LR = 1e-4
 TEXT_MODEL_NAME = "albert-base-v2"
