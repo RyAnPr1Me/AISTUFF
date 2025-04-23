@@ -148,7 +148,7 @@ def validate_and_clean(df: pd.DataFrame,
 
 def main():
     setup_logging()
-<<<<<<< HEAD
+
     parser = argparse.ArgumentParser(
         description="Validate and clean CSV training data files"
     )
