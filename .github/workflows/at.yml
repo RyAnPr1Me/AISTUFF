@@ -63,41 +63,54 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
+          set -e
           mkdir -p kaggle_dataset
           cp Training_Data/optimized_data.csv kaggle_dataset/
           export KAGGLE_TIMESTAMP=$(date +%s)
           export KAGGLE_DATA_ID="ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP"
           echo "{\"title\":\"stockai-data-$KAGGLE_TIMESTAMP\",\"id\":\"$KAGGLE_DATA_ID\",\"licenses\":[{\"name\":\"CC0-1.0\"}]}" > kaggle_dataset/dataset-metadata.json
-          kaggle datasets create -p kaggle_dataset --dir-mode zip
+          kaggle datasets create -p kaggle_dataset --dir-mode zip || { echo "Kaggle dataset creation failed"; cat kaggle_dataset/dataset-metadata.json; exit 1; }
           echo "$KAGGLE_DATA_ID" > kaggle_dataset_id.txt
+          echo "$KAGGLE_TIMESTAMP" > kaggle_timestamp.txt
 
       - name: Push Kernel to Kaggle (with retries)
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
+          set -e
           mkdir -p kaggle_kernel
           cp train_model.py kaggle_kernel/
-          export KAGGLE_TIMESTAMP=$(date +%s)
+          export KAGGLE_TIMESTAMP=$(cat kaggle_timestamp.txt)
           export KAGGLE_KERNEL_ID="ryanmanzo/stockai-kernel-$KAGGLE_TIMESTAMP"
           export KAGGLE_DATA_ID=$(cat kaggle_dataset_id.txt)
-          echo "{
-            \"id\": \"$KAGGLE_KERNEL_ID\",
-            \"title\": \"stockai-kernel-$KAGGLE_TIMESTAMP\",
-            \"code_file\": \"train_model.py\",
-            \"language\": \"python\",
-            \"kernel_type\": \"notebook\",
-            \"is_private\": true,
-            \"enable_gpu\": true,
-            \"dataset_sources\": [\"$KAGGLE_DATA_ID\"]
-          }" > kaggle_kernel/kernel-metadata.json
+          cat <<EOF > kaggle_kernel/kernel-metadata.json
+{
+  "id": "$KAGGLE_KERNEL_ID",
+  "title": "stockai-kernel-$KAGGLE_TIMESTAMP",
+  "code_file": "train_model.py",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "dataset_sources": ["$KAGGLE_DATA_ID"]
+}
+EOF
+
+          cat kaggle_kernel/kernel-metadata.json
 
           ATTEMPT=0
           MAX_ATTEMPTS=5
-          until kaggle kernels push -p kaggle_kernel; do
+          while ! kaggle kernels push -p kaggle_kernel 2> kaggle_kernel/push_error.log; do
             ATTEMPT=$((ATTEMPT+1))
+            cat kaggle_kernel/push_error.log
+            if grep -q "Expecting value" kaggle_kernel/push_error.log; then
+              echo "❌ JSON error detected in kernel-metadata.json. Aborting."
+              cat kaggle_kernel/kernel-metadata.json
+              exit 1
+            fi
             if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-              echo "🔥 Kernel push failed after $MAX_ATTEMPTS attempts. Here's your cursed metadata:"
+              echo "🔥 Kernel push failed after $MAX_ATTEMPTS attempts. Here's your metadata:"
               cat kaggle_kernel/kernel-metadata.json
               exit 1
             fi
