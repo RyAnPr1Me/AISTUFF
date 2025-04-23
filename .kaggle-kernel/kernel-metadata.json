@@ -1,0 +1,10 @@
+{
+  "id": "ryanmanzo/stockai-trainer",
+  "title": "StockAI Trainer",
+  "code_file": "train_model.py",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "dataset_sources": ["ryanmanzo/stockai-data-latest"]
+}
