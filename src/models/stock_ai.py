@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoConfig
+from transformers import AutoModel, AutoConfig,AutoTokenizer
 from .fusion import GatedFusion, CrossModalAttention
 from .audio_encoder import AudioEncoder
 from .time_series_encoder import TimeSeriesEncoder
@@ -8,7 +8,7 @@ from .interpretability import compute_feature_importance
 
 class MultimodalStockPredictor(nn.Module):
     def __init__(self, 
-                 text_model_name="bert-large-uncased",
+                 text_model_name="albert-large-v2",
                  vision_model_name=None,
                  tabular_dim=64,  # <-- Change this to match your data, e.g., tabular_dim=5
                  audio_dim=None,
@@ -50,6 +50,8 @@ class MultimodalStockPredictor(nn.Module):
             use_mixed_precision (bool): Enable mixed precision training.
             ...existing code...
         """
+          # Load the tokenizer for ALBERT
+        self.tokenizer = AutoTokenizer.from_pretrained(text_model_name)
         super().__init__()
         self.tabular_dim = tabular_dim  # Save for runtime check
         # Text encoder (large transformer)
