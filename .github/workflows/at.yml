@@ -24,6 +24,14 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Download and Prepare Stock Data
+        run: |
+          python download_and_prepare_stock_data.py
+
+      - name: Format for ALBERT
+        run: |
+          python format_for_albert.py --folder Training_Data
+
       - name: Validate and Prepare Data
         run: |
           python validate_and_prepare.py
