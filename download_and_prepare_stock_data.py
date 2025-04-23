@@ -200,5 +200,14 @@ def main():
         logging.error(f"Failed to save CSV: {e}")
         sys.exit(1)
 
+    # --- New: Automatically format for ALBERT after saving ---
+    try:
+        from format_for_albert import format_dataset_for_albert
+        albert_out = os.path.join(args.output_dir, f"albert_{os.path.basename(out_path)}")
+        format_dataset_for_albert(out_path, albert_out)
+        logging.info(f"Formatted for ALBERT: {albert_out}")
+    except Exception as e:
+        logging.warning(f"Could not format for ALBERT automatically: {e}")
+
 if __name__ == "__main__":
     main()

@@ -24,7 +24,7 @@ from tqdm import tqdm
 
 
 # Paths (removed saving paths)
-VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
+VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"  # This should be ALBERT-formatted after pipeline
 
 # Training parameters
 BATCH_SIZE = 8

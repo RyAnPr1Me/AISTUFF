@@ -242,6 +242,10 @@ def main():
         '--end', type=str, default='2025-01-01',
         help='End date for stock data download (YYYY-MM-DD)'
     )
+    parser.add_argument(
+        '--albert-only', action='store_true', default=True,
+        help='If set, only process files prefixed with albert_ (default: True)'
+    )
     args = parser.parse_args()
 
     # --- New: Download and prepare stock data if requested ---
@@ -310,9 +314,12 @@ def main():
         sys.exit(1)
 
     csv_files = [f for f in os.listdir(args.data_dir) if f.lower().endswith('.csv')]
-    if not csv_files:
-        logging.error(f"No CSV files found in {args.data_dir}.")
-        sys.exit(1)
+    # Only process ALBERT-formatted files unless --albert-only is False
+    if args.albert_only:
+        csv_files = [f for f in csv_files if f.startswith('albert_')]
+        if not csv_files:
+            logging.error("No ALBERT-formatted CSV files found. Run format_for_albert.py first.")
+            sys.exit(1)
 
     # Initialize tokenizer once
     try:
