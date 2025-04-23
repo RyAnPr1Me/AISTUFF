@@ -62,23 +62,25 @@ jobs:
         run: |
           mkdir -p kaggle_dataset
           cp Training_Data/optimized_data.csv kaggle_dataset/
-          echo '{"title":"stockai-data-$(date +%s)","id":"ryanmanzo/stockai-data-$(date +%s)","licenses":[{"name":"CC0-1.0"}]}' > kaggle_dataset/dataset-metadata.json
+          export KAGGLE_TIMESTAMP=$(date +%s)
+          echo "{\"title\":\"stockai-data-$KAGGLE_TIMESTAMP\",\"id\":\"ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP\",\"licenses\":[{\"name\":\"CC0-1.0\"}]}" > kaggle_dataset/dataset-metadata.json
           kaggle datasets create -p kaggle_dataset --dir-mode zip
 
       - name: Push Kernel to Kaggle
         run: |
           mkdir -p kaggle_kernel
           cp train_model.py kaggle_kernel/
-          echo '{
-            "id": "ryanmanzo/stockai-kernel",
-            "title": "Train StockAI Model",
-            "code_file": "train_model.py",
-            "language": "python",
-            "kernel_type": "notebook",
-            "is_private": true,
-            "enable_gpu": true,
-            "dataset_sources": ["ryanmanzo/stockai-data-$(date +%s)"]
-          }' > kaggle_kernel/kernel-metadata.json
+          export KAGGLE_TIMESTAMP=$(date +%s)
+          echo "{
+            \"id\": \"ryanmanzo/stockai-kernel-$KAGGLE_TIMESTAMP\",
+            \"title\": \"stockai-kernel-$KAGGLE_TIMESTAMP\",
+            \"code_file\": \"train_model.py\",
+            \"language\": \"python\",
+            \"kernel_type\": \"notebook\",
+            \"is_private\": true,
+            \"enable_gpu\": true,
+            \"dataset_sources\": [\"ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP\"]
+          }" > kaggle_kernel/kernel-metadata.json
           kaggle kernels push -p kaggle_kernel
 
       - name: Wait for Kernel Execution
