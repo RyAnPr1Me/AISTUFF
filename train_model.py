@@ -152,13 +152,23 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
 
 def main():
     setup_logging()
-    device = torch.device("cpu")
+
+    # Kaggle: Use GPU if available, else CPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Using device: {device}")
 
-    # Set number of threads for PyTorch to use all CPU cores
-    cpu_count = os.cpu_count() or 2
+    # Kaggle: Limit number of threads for reproducibility and avoid OOM
+    cpu_count = min(4, os.cpu_count() or 2)
     torch.set_num_threads(cpu_count)
     logging.info(f"Set torch to use {cpu_count} CPU threads.")
+
+    # Kaggle: Reduce batch size if running on CPU to avoid OOM
+    batch_size = BATCH_SIZE
+    if device.type == "cpu":
+        batch_size = min(BATCH_SIZE, 16)
+        logging.info(f"Running on CPU, batch size set to {batch_size}")
+    else:
+        logging.info(f"Running on CUDA, batch size set to {batch_size}")
 
     # Hard time limit: 5 hours 50 minutes (in seconds)
     MAX_TRAIN_SECONDS = 5 * 3600 + 50 * 60  # 21000 seconds
@@ -212,28 +222,30 @@ def main():
     train_ds = StockDataset(X_text_train, X_tab_train, y_train, tokenizer)
     val_ds = StockDataset(X_text_val, X_tab_val, y_val, tokenizer)
 
-    # DataLoader optimizations for CPU
-    num_workers = cpu_count
-    pin_memory = False
-    persistent_workers = False
+    # DataLoader optimizations for Kaggle
+    num_workers = min(2, cpu_count)
+    pin_memory = device.type == "cuda"
+    persistent_workers = pin_memory
 
     train_loader = DataLoader(
-        train_ds, batch_size=BATCH_SIZE, shuffle=True,
+        train_ds, batch_size=batch_size, shuffle=True,
         pin_memory=pin_memory, num_workers=num_workers, persistent_workers=persistent_workers
     )
     val_loader = DataLoader(
-        val_ds, batch_size=BATCH_SIZE, shuffle=False,
+        val_ds, batch_size=batch_size, shuffle=False,
         pin_memory=pin_memory, num_workers=num_workers, persistent_workers=persistent_workers
     )
 
     logging.info(f"Train loader: {len(train_loader)} batches | Val loader: {len(val_loader)} batches")
-    logging.info(f"Batch size: {BATCH_SIZE} | Num workers: {num_workers}")
+    logging.info(f"Batch size: {batch_size} | Num workers: {num_workers}")
 
     # Initialize model, loss, optimizer, scheduler
     model = MultimodalStockPredictor(tabular_dim=TABULAR_DIM, text_model_name=TEXT_MODEL_NAME).to(device)
     try:
-        model = torch.compile(model)
-        logging.info("Model compiled with torch.compile for performance.")
+        # torch.compile may not be available in Kaggle, so skip if not
+        if hasattr(torch, "compile"):
+            model = torch.compile(model)
+            logging.info("Model compiled with torch.compile for performance.")
     except Exception as e:
         logging.warning(f"torch.compile not available or failed: {e}")
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -246,13 +258,11 @@ def main():
     epochs_no_improve = 0
 
     for epoch in range(EPOCHS):
-        # Check time limit before starting epoch
         elapsed = time.time() - start_time
         if elapsed > MAX_TRAIN_SECONDS:
             logging.warning(f"Time limit of {MAX_TRAIN_SECONDS/3600:.2f} hours reached. Stopping training.")
             break
 
-        # Enhanced epoch notification
         logging.info(
             f"\n[Epoch {epoch+1}/{EPOCHS}] "
             f"Elapsed: {elapsed/60:.1f} min | "
@@ -284,7 +294,7 @@ def main():
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(train_loader):
                 logging.info(
                     f"Epoch {epoch+1} Batch {batch_idx+1}/{len(train_loader)}: "
-                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*BATCH_SIZE}"
+                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*batch_size}"
                 )
 
         avg_train_loss = train_loss / len(train_loader)
@@ -328,7 +338,7 @@ def main():
             if (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == len(val_loader):
                 logging.info(
                     f"Epoch {epoch+1} Val Batch {batch_idx+1}/{len(val_loader)}: "
-                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*BATCH_SIZE}"
+                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*batch_size}"
                 )
 
         avg_val_loss = val_loss / len(val_loader)
@@ -367,7 +377,6 @@ def main():
                 logging.info("Early stopping triggered.")
                 break
 
-        # Check time limit after epoch as well (in case epoch is long)
         elapsed = time.time() - start_time
         if elapsed > MAX_TRAIN_SECONDS:
             logging.warning(f"Time limit of {MAX_TRAIN_SECONDS/3600:.2f} hours reached. Stopping training.")
