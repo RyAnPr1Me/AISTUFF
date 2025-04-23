@@ -185,19 +185,11 @@ def main():
         '--albert-only', action='store_true', default=True,
         help='If set, only process files prefixed with albert_ (default: True)'
     )
-
-    parser = argparse.ArgumentParser(description="Validate and clean CSV training data files")
-    parser.add_argument('--data-dir', type=str, default='Training_Data', help='Directory with CSV files to validate')
-    parser.add_argument('--output', type=str, default='Training_Data/validated_data.csv', help='Output path for validated data')
-    parser.add_argument('--tokenizer', type=str, default='albert-base-v2', help='Hugging Face tokenizer model name')
-    parser.add_argument('--columns', nargs='+', default=['text', 'label'], help='List of required columns in each CSV')
-    parser.add_argument('--download-ticker', type=str, default=None, help='If set, download stock data for this ticker and create a dataset (CSV) in data-dir')
     args = parser.parse_args()
 
     if not os.path.isdir(args.data_dir):
         logging.error(f"Directory not found: {args.data_dir}")
         sys.exit(1)
-
 
     csv_files = [f for f in os.listdir(args.data_dir) if f.lower().endswith('.csv')]
     # Only process ALBERT-formatted files unless --albert-only is False
@@ -214,12 +206,7 @@ def main():
         logging.error(f"Failed to load tokenizer '{args.tokenizer}': {e}")
         sys.exit(1)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
-
-
     validated_dfs = []
-    csv_files = [f for f in os.listdir(args.data_dir) if f.lower().endswith('.csv')]
-    
     for fname in csv_files:
         path = os.path.join(args.data_dir, fname)
         logging.info(f"Processing {fname}...")
