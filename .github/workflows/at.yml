@@ -66,8 +66,10 @@ jobs:
           mkdir -p kaggle_dataset
           cp Training_Data/optimized_data.csv kaggle_dataset/
           export KAGGLE_TIMESTAMP=$(date +%s)
-          echo "{\"title\":\"stockai-data-$KAGGLE_TIMESTAMP\",\"id\":\"ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP\",\"licenses\":[{\"name\":\"CC0-1.0\"}]}" > kaggle_dataset/dataset-metadata.json
+          export KAGGLE_DATA_ID="ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP"
+          echo "{\"title\":\"stockai-data-$KAGGLE_TIMESTAMP\",\"id\":\"$KAGGLE_DATA_ID\",\"licenses\":[{\"name\":\"CC0-1.0\"}]}" > kaggle_dataset/dataset-metadata.json
           kaggle datasets create -p kaggle_dataset --dir-mode zip
+          echo "$KAGGLE_DATA_ID" > kaggle_dataset_id.txt
 
       - name: Push Kernel to Kaggle (with retries)
         env:
@@ -78,7 +80,7 @@ jobs:
           cp train_model.py kaggle_kernel/
           export KAGGLE_TIMESTAMP=$(date +%s)
           export KAGGLE_KERNEL_ID="ryanmanzo/stockai-kernel-$KAGGLE_TIMESTAMP"
-          export KAGGLE_DATA_ID="ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP"
+          export KAGGLE_DATA_ID=$(cat kaggle_dataset_id.txt)
           echo "{
             \"id\": \"$KAGGLE_KERNEL_ID\",
             \"title\": \"stockai-kernel-$KAGGLE_TIMESTAMP\",
