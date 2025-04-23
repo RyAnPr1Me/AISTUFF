@@ -8,7 +8,6 @@ warnings.filterwarnings("ignore")
 import torch
 import pandas as pd
 import logging
-import warnings
 from transformers import AutoTokenizer
 from src.models.stock_ai import MultimodalStockPredictor
 from torch.utils.data import DataLoader, Dataset
@@ -22,7 +21,6 @@ from tqdm import tqdm
 # Train Model Script with Performance Optimizations
 #========================================================================
 
-
 # Paths (removed saving paths)
 VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
 
@@ -30,7 +28,7 @@ VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
 BATCH_SIZE = 8
 EPOCHS = 5  # Reduced for faster testing
 LR = 1e-4
-TEXT_MODEL_NAME = "bert-base-uncased"
+TEXT_MODEL_NAME = "albert-base-v2"
 TABULAR_DIM = 64
 EARLY_STOPPING_PATIENCE = 5
 MAX_SEQ_LEN = 128  # Max sequence length for text
@@ -131,6 +129,8 @@ def main():
     epochs_no_improve = 0
 
     for epoch in range(EPOCHS):
+        logging.info(f"\n[Epoch {epoch+1}/{EPOCHS}] Training...")
+
         # Training
         model.train()
         train_loss, train_preds, train_labels = 0.0, [], []
@@ -156,36 +156,42 @@ def main():
         train_acc = accuracy_score(train_labels, train_preds)
         writer.add_scalar('Loss/train', avg_train_loss, epoch)
         writer.add_scalar('Acc/train', train_acc, epoch)
-        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Train loss: {avg_train_loss:.4f}, Acc: {train_acc:.4f}")
+        
+        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}")
 
         # Validation
+        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Validation...")
         model.eval()
         val_loss, val_preds, val_labels = 0.0, [], []
-        for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Validation]", leave=False):
-            ids = batch['input_ids'].to(device)
-            mask = batch['attention_mask'].to(device)
-            tab = batch['tabular'].to(device)
-            lbl = batch['label'].to(device)
+        with torch.no_grad():  # Disable gradients for validation to save memory
+            for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Validation]", leave=False):
+                ids = batch['input_ids'].to(device)
+                mask = batch['attention_mask'].to(device)
+                tab = batch['tabular'].to(device)
+                lbl = batch['label'].to(device)
 
-            logits = model({'input_ids': ids, 'attention_mask': mask}, tab)
-            loss = loss_fn(logits, lbl)
-            val_loss += loss.item()
-            preds = logits.argmax(dim=1).cpu().tolist()
-            val_preds.extend(preds)
-            val_labels.extend(lbl.cpu().tolist())
+                logits = model({'input_ids': ids, 'attention_mask': mask}, tab)
+                loss = loss_fn(logits, lbl)
+                val_loss += loss.item()
+                preds = logits.argmax(dim=1).cpu().tolist()
+                val_preds.extend(preds)
+                val_labels.extend(lbl.cpu().tolist())
 
         avg_val_loss = val_loss / len(val_loader)
         val_acc = accuracy_score(val_labels, val_preds)
         val_prec = precision_score(val_labels, val_preds, average='macro', zero_division=0)
         val_rec = recall_score(val_labels, val_preds, average='macro', zero_division=0)
         val_f1 = f1_score(val_labels, val_preds, average='macro', zero_division=0)
+
+        # Log metrics
         writer.add_scalar('Loss/val', avg_val_loss, epoch)
         writer.add_scalar('Acc/val', val_acc, epoch)
         writer.add_scalar('Prec/val', val_prec, epoch)
         writer.add_scalar('Rec/val', val_rec, epoch)
         writer.add_scalar('F1/val', val_f1, epoch)
-        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Val loss: {avg_val_loss:.4f}, Acc: {val_acc:.4f}, F1: {val_f1:.4f}")
 
+        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Val Loss: {avg_val_loss:.4f}, Val Accuracy: {val_acc:.4f}, F1 Score: {val_f1:.4f}")
+        
         # LR scheduler step
         scheduler.step(avg_val_loss)
 
