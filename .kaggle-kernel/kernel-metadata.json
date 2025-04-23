@@ -1,6 +1,6 @@
 {
-  "id": "ryanmanzo/stockai-trainer",
-  "title": "StockAI Trainer",
+  "id": "ryanmanzo/stockai-kernel",
+  "title": "Train StockAI Model",
   "code_file": "train_model.py",
   "language": "python",
   "kernel_type": "notebook",
