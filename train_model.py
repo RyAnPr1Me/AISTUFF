@@ -22,12 +22,23 @@ import numpy as np
 # Train Model Script with Performance Optimizations and Informative Logging
 #========================================================================
 
+<<<<<<< HEAD
 VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"  # This should be ALBERT-formatted after pipeline
 
 BATCH_SIZE = 32
 EPOCHS = 5  # Reduced for faster testing
 LR = 1e-4
 TEXT_MODEL_NAME = "albert-large-v2"  # Use ALBERT for consistency with pipeline2
+=======
+# Paths (removed saving paths)
+VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
+
+# Training parameters
+BATCH_SIZE = 32
+EPOCHS = 5  # Reduced for faster testing
+LR = 1e-4
+TEXT_MODEL_NAME = "albert-base-v2"
+>>>>>>> 867e29f043a4e1d39deb33d7fad26794a916ade8
 TABULAR_DIM = 64
 EARLY_STOPPING_PATIENCE = 5
 MAX_SEQ_LEN = 128  # Max sequence length for text
@@ -149,6 +160,8 @@ def main():
     epochs_no_improve = 0
 
     for epoch in range(EPOCHS):
+        logging.info(f"\n[Epoch {epoch+1}/{EPOCHS}] Training...")
+
         # Training
         model.train()
         train_loss, train_preds, train_labels = 0.0, [], []
@@ -174,16 +187,24 @@ def main():
         train_acc = accuracy_score(train_labels, train_preds)
         writer.add_scalar('Loss/train', avg_train_loss, epoch)
         writer.add_scalar('Acc/train', train_acc, epoch)
+<<<<<<< HEAD
+=======
+        
+        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}")
+>>>>>>> 867e29f043a4e1d39deb33d7fad26794a916ade8
 
         # Validation
+        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Validation...")
         model.eval()
         val_loss, val_preds, val_labels = 0.0, [], []
-        for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Validation]", leave=False):
-            ids = batch['input_ids'].to(device)
-            mask = batch['attention_mask'].to(device)
-            tab = batch['tabular'].to(device)
-            lbl = batch['label'].to(device)
+        with torch.no_grad():  # Disable gradients for validation to save memory
+            for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Validation]", leave=False):
+                ids = batch['input_ids'].to(device)
+                mask = batch['attention_mask'].to(device)
+                tab = batch['tabular'].to(device)
+                lbl = batch['label'].to(device)
 
+<<<<<<< HEAD
             with torch.no_grad():
                 logits = model({'input_ids': ids, 'attention_mask': mask}, tab)
                 loss = loss_fn(logits, lbl)
@@ -191,21 +212,37 @@ def main():
             preds = logits.argmax(dim=1).cpu().tolist()
             val_preds.extend(preds)
             val_labels.extend(lbl.cpu().tolist())
+=======
+                logits = model({'input_ids': ids, 'attention_mask': mask}, tab)
+                loss = loss_fn(logits, lbl)
+                val_loss += loss.item()
+                preds = logits.argmax(dim=1).cpu().tolist()
+                val_preds.extend(preds)
+                val_labels.extend(lbl.cpu().tolist())
+>>>>>>> 867e29f043a4e1d39deb33d7fad26794a916ade8
 
         avg_val_loss = val_loss / len(val_loader)
         val_acc = accuracy_score(val_labels, val_preds)
         val_prec = precision_score(val_labels, val_preds, average='macro', zero_division=0)
         val_rec = recall_score(val_labels, val_preds, average='macro', zero_division=0)
         val_f1 = f1_score(val_labels, val_preds, average='macro', zero_division=0)
+
+        # Log metrics
         writer.add_scalar('Loss/val', avg_val_loss, epoch)
         writer.add_scalar('Acc/val', val_acc, epoch)
         writer.add_scalar('Prec/val', val_prec, epoch)
         writer.add_scalar('Rec/val', val_rec, epoch)
         writer.add_scalar('F1/val', val_f1, epoch)
 
+<<<<<<< HEAD
         print_metrics(epoch, avg_train_loss, train_acc, avg_val_loss, val_acc, val_prec, val_rec, val_f1)
         print_confusion(val_labels, val_preds)
 
+=======
+        logging.info(f"Epoch {epoch+1}/{EPOCHS} - Val Loss: {avg_val_loss:.4f}, Val Accuracy: {val_acc:.4f}, F1 Score: {val_f1:.4f}")
+        
+        # LR scheduler step
+>>>>>>> 867e29f043a4e1d39deb33d7fad26794a916ade8
         scheduler.step(avg_val_loss)
 
         # Early stopping check
