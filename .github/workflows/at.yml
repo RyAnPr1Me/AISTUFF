@@ -20,6 +20,14 @@ jobs:
         with:
           python-version: '3.8'
 
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
@@ -35,6 +43,10 @@ jobs:
       - name: Validate and Prepare Data
         run: |
           python validate_and_prepare.py
+
+      - name: Optimize Data for AI Model
+        run: |
+          python optimize_data.py --input Training_Data/validated_data.csv --output Training_Data/optimized_data.csv
 
       - name: Train AI Model
         run: |
