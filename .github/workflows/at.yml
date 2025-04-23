@@ -58,39 +58,31 @@ jobs:
           echo "{\"username\":\"$KAGGLE_USERNAME\",\"key\":\"$KAGGLE_KEY\"}" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
+      - name: Generate Kaggle Timestamp
+        run: echo "KAGGLE_TIMESTAMP=$(date +%s)" >> $GITHUB_ENV
+
       - name: Create Kaggle Dataset
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
           mkdir -p kaggle_dataset
           cp Training_Data/optimized_data.csv kaggle_dataset/
-          export KAGGLE_TIMESTAMP=$(date +%s)
-          export KAGGLE_DATA_ID="ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP"
-          echo "{\"title\":\"stockai-data-$KAGGLE_TIMESTAMP\",\"id\":\"$KAGGLE_DATA_ID\",\"licenses\":[{\"name\":\"CC0-1.0\"}]}" > kaggle_dataset/dataset-metadata.json
+          echo "{\"title\":\"stockai-data-${KAGGLE_TIMESTAMP}\",\"id\":\"ryanmanzo/stockai-data-${KAGGLE_TIMESTAMP}\",\"licenses\":[{\"name\":\"CC0-1.0\"}]}" > kaggle_dataset/dataset-metadata.json
           kaggle datasets create -p kaggle_dataset --dir-mode zip
 
       - name: Push Kernel to Kaggle
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
           mkdir -p kaggle_kernel
           cp train_model.py kaggle_kernel/
-          export KAGGLE_TIMESTAMP=$(date +%s)
-          export KAGGLE_KERNEL_ID="ryanmanzo/stockai-kernel-$KAGGLE_TIMESTAMP"
-          export KAGGLE_DATA_ID="ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP"
           echo "{
-            \"id\": \"$KAGGLE_KERNEL_ID\",
-            \"title\": \"stockai-kernel-$KAGGLE_TIMESTAMP\",
+            \"id\": \"ryanmanzo/stockai-kernel-${KAGGLE_TIMESTAMP}\",
+            \"title\": \"stockai-kernel-${KAGGLE_TIMESTAMP}\",
             \"code_file\": \"train_model.py\",
             \"language\": \"python\",
             \"kernel_type\": \"notebook\",
             \"is_private\": true,
             \"enable_gpu\": true,
-            \"dataset_sources\": [\"$KAGGLE_DATA_ID\"]
+            \"dataset_sources\": [\"ryanmanzo/stockai-data-${KAGGLE_TIMESTAMP}\"]
           }" > kaggle_kernel/kernel-metadata.json
-          cat kaggle_kernel/kernel-metadata.json  # Debug: show metadata file
+          cat kaggle_kernel/kernel-metadata.json
           kaggle kernels push -p kaggle_kernel || (cat kaggle_kernel/kernel-metadata.json && exit 1)
 
       - name: Wait for Kernel Execution
@@ -100,7 +92,7 @@ jobs:
 
       - name: Download Trained Model from Kaggle
         run: |
-          kaggle kernels output ryanmanzo/stockai-kernel -p trained_model
+          kaggle kernels output ryanmanzo/stockai-kernel-${KAGGLE_TIMESTAMP} -p trained_model
           ls -la trained_model
 
       - name: Upload model weights to Hugging Face
