@@ -210,22 +210,12 @@ def main():
                 tab = batch['tabular'].to(device)
                 lbl = batch['label'].to(device)
 
-
-            with torch.no_grad():
-                logits = model({'input_ids': ids, 'attention_mask': mask}, tab)
-                loss = loss_fn(logits, lbl)
-            val_loss += loss.item()
-            preds = logits.argmax(dim=1).cpu().tolist()
-            val_preds.extend(preds)
-            val_labels.extend(lbl.cpu().tolist())
-
                 logits = model({'input_ids': ids, 'attention_mask': mask}, tab)
                 loss = loss_fn(logits, lbl)
                 val_loss += loss.item()
                 preds = logits.argmax(dim=1).cpu().tolist()
                 val_preds.extend(preds)
                 val_labels.extend(lbl.cpu().tolist())
-
 
         avg_val_loss = val_loss / len(val_loader)
         val_acc = accuracy_score(val_labels, val_preds)
