@@ -3,12 +3,12 @@ name: Train AI on New Data
 on:
   push:
     paths:
-      - 'Training_Data/**'  # Trigger on any new or modified files in the Training_Data folder
-  workflow_dispatch:  # Manual trigger option
+      - 'Training_Data/**'
+  workflow_dispatch:
 
 jobs:
   validate-train:
-    name: Validate and Train AI
+    name: Validate and Train AI via Kaggle
     runs-on: ubuntu-latest
 
     steps:
@@ -31,6 +31,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
+          pip install kaggle huggingface-hub
 
       - name: Download and Prepare Stock Data
         run: |
@@ -48,21 +49,47 @@ jobs:
         run: |
           python optimize_data.py --input Training_Data/validated_data.csv --output Training_Data/optimized_data.csv
 
-      - name: Train AI Model
+      - name: Set up Kaggle CLI
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
-          python train_model.py
+          mkdir -p ~/.kaggle
+          echo "{\"username\":\"$KAGGLE_USERNAME\",\"key\":\"$KAGGLE_KEY\"}" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
 
-      - name: Save Trained Model
+      - name: Create Kaggle Dataset
         run: |
-          mkdir -p trained_model
-          if [ ! -f "trained_model/model_weights.pth" ]; then
-            echo "Training did not produce model_weights.pth" >&2
-            exit 1
-          fi
+          mkdir -p kaggle_dataset
+          cp Training_Data/optimized_data.csv kaggle_dataset/
+          echo '{"title":"stockai-data-$(date +%s)","id":"ryanmanzo/stockai-data-$(date +%s)","licenses":[{"name":"CC0-1.0"}]}' > kaggle_dataset/dataset-metadata.json
+          kaggle datasets create -p kaggle_dataset --dir-mode zip
 
-      - name: Install Hugging Face Hub CLI
+      - name: Push Kernel to Kaggle
         run: |
-          pip install huggingface-hub
+          mkdir -p kaggle_kernel
+          cp train_model.py kaggle_kernel/
+          echo '{
+            "id": "ryanmanzo/stockai-kernel",
+            "title": "Train StockAI Model",
+            "code_file": "train_model.py",
+            "language": "python",
+            "kernel_type": "notebook",
+            "is_private": true,
+            "enable_gpu": true,
+            "dataset_sources": ["ryanmanzo/stockai-data-$(date +%s)"]
+          }' > kaggle_kernel/kernel-metadata.json
+          kaggle kernels push -p kaggle_kernel
+
+      - name: Wait for Kernel Execution
+        run: |
+          echo "Sleeping 10 minutes to allow training to complete"
+          sleep 600
+
+      - name: Download Trained Model from Kaggle
+        run: |
+          kaggle kernels output ryanmanzo/stockai-kernel -p trained_model
+          ls -la trained_model
 
       - name: Upload model weights to Hugging Face
         env:
