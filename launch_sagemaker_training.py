@@ -16,8 +16,8 @@ def main():
     args = parser.parse_args()
 
     session = sagemaker.Session()
-    s3_input = f's3://{args.bucket}/{args.input-key}'
-    s3_output = f's3://{args.bucket}/{args.output-key}'
+    s3_input = f's3://{args.bucket}/{args.input_key}'
+    s3_output = f's3://{args.bucket}/{args.output_key}'
 
     if args.image_uri:
         estimator = Estimator(
@@ -28,7 +28,6 @@ def main():
             output_path=s3_output,
             sagemaker_session=session,
             hyperparameters={
-                'input-data': '/opt/ml/input/data/train/optimized_data.csv',
                 'epochs': 5,
                 'batch-size': 32,
                 'lr': 1e-4
