@@ -3,6 +3,7 @@ import boto3
 import sagemaker
 from sagemaker.estimator import Estimator
 import time
+import os
 
 def main():
     parser = argparse.ArgumentParser()
@@ -47,7 +48,7 @@ def main():
             output_path=s3_output,
             sagemaker_session=session,
             hyperparameters={
-                'input-data': '/opt/ml/input/data/train/optimized_data.csv',
+                'input-data': '/opt/ml/input/data/train',
                 'epochs': 5,
                 'batch-size': 32,
                 'lr': 1e-4
@@ -57,6 +58,16 @@ def main():
     inputs = {
         'train': s3_input
     }
+
+    # Check if the S3 input path exists and is accessible
+    try:
+        s3 = boto3.resource('s3')
+        bucket_name = args.bucket
+        key = args.input_key
+        s3.Object(bucket_name, key).load()
+    except Exception as e:
+        print(f"Error accessing S3 input data: {e}")
+        return  # Exit if the S3 path is not accessible
 
     print(f"Launching SageMaker training job: {args.job_name}")
     estimator.fit(inputs=inputs, job_name=args.job_name, wait=True)
