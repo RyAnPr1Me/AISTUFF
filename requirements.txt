@@ -11,3 +11,4 @@ tensorboard
 yfinance
 # TA-Lib removed, use pandas/numpy for indicators-learn
 scikit-learn
+sagemaker
