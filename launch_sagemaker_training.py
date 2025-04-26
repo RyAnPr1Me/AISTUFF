@@ -48,7 +48,7 @@ def main():
             output_path=s3_output,
             sagemaker_session=session,
             hyperparameters={
-                'input-data': '/opt/ml/input/data/train',
+                'input-data': '/opt/ml/input/data/train/optimized_data.csv',
                 'epochs': 5,
                 'batch-size': 32,
                 'lr': 1e-4
