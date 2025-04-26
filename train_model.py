@@ -29,7 +29,8 @@ VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"  # This should be ALBER
 BATCH_SIZE = 32
 EPOCHS = 5  # Reduced for faster testing
 LR = 1e-4
-TEXT_MODEL_NAME = "albert-large-v2"  # Use ALBERT for consistency with pipeline2
+TEXT_MODEL_NAME = "albert-base-v2"  # Use ALBERT base for compatibility with SageMaker PyTorch image
+assert TEXT_MODEL_NAME == "albert-base-v2", "Use albert-base-v2 for SageMaker compatibility"
 
 # Paths (removed saving paths)
 VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
