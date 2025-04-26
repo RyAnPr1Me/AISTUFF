@@ -43,7 +43,7 @@ def main():
             instance_count=1,
             instance_type=args.instance_type,
             framework_version='1.13.1',
-            py_version='py38',
+            py_version='py39',
             output_path=s3_output,
             sagemaker_session=session,
             hyperparameters={
