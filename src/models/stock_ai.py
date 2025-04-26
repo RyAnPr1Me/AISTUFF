@@ -10,11 +10,11 @@ class MultimodalStockPredictor(nn.Module):
     def __init__(self, 
                  text_model_name="albert-large-v2",
                  vision_model_name=None,
-                 tabular_dim=64,  # <-- Change this to match your data, e.g., tabular_dim=5
+                 tabular_dim=64,
                  audio_dim=None,
                  time_series_dim=None,
                  hidden_dim=1024,
-                 num_labels=3,
+                 num_labels=2,  # <-- Set default to 2 for binary classification
                  fusion_layers=2,
                  activation=nn.ReLU,
                  tabular_dropout=0.1,

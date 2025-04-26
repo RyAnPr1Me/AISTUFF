@@ -11,13 +11,13 @@ import logging
 from transformers import AutoTokenizer
 from src.models.stock_ai import MultimodalStockPredictor
 from torch.utils.data import DataLoader, Dataset
-from torch.utils.tensorboard import SummaryWriter
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from tqdm import tqdm
 import numpy as np
 import time
+import argparse
 
 #========================================================================
 # Train Model Script with Performance Optimizations and Informative Logging
@@ -153,6 +153,18 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
 def main():
     setup_logging()
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--epochs', type=int, default=EPOCHS)
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE)
+    parser.add_argument('--lr', type=float, default=LR)
+    parser.add_argument('--input-data', type=str, default=OPTIMIZED_DATA_PATH)
+    parser.add_argument('--model-dir', type=str, default='/opt/ml/model')
+    args = parser.parse_args()
+
+    # Use SageMaker environment variables if present
+    input_data_path = os.environ.get('SM_CHANNEL_TRAIN', args.input_data)
+    model_dir = os.environ.get('SM_MODEL_DIR', args.model_dir)
+
     # Kaggle: Use GPU if available, else CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Using device: {device}")
@@ -163,9 +175,9 @@ def main():
     logging.info(f"Set torch to use {cpu_count} CPU threads.")
 
     # Kaggle: Reduce batch size if running on CPU to avoid OOM
-    batch_size = BATCH_SIZE
+    batch_size = args.batch_size
     if device.type == "cpu":
-        batch_size = min(BATCH_SIZE, 16)
+        batch_size = min(args.batch_size, 16)
         logging.info(f"Running on CPU, batch size set to {batch_size}")
     else:
         logging.info(f"Running on CUDA, batch size set to {batch_size}")
@@ -175,9 +187,9 @@ def main():
     start_time = time.time()
 
     # Load and preprocess data
-    logging.info(f"Loading data from {OPTIMIZED_DATA_PATH}")
-    data = pd.read_csv(OPTIMIZED_DATA_PATH)
-    logging.info(f"Loaded {len(data)} rows and {len(data.columns)} columns from {OPTIMIZED_DATA_PATH}")
+    logging.info(f"Loading data from {input_data_path}")
+    data = pd.read_csv(input_data_path)
+    logging.info(f"Loaded {len(data)} rows and {len(data.columns)} columns from {input_data_path}")
     if data.isnull().values.any():
         logging.warning("Data contains NaN values; filling with zeros.")
         data = data.fillna(0)
@@ -249,22 +261,20 @@ def main():
     except Exception as e:
         logging.warning(f"torch.compile not available or failed: {e}")
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2, factor=0.5)
-
-    writer = SummaryWriter(log_dir='runs/stock_model')
 
     best_val_loss = float('inf')
     epochs_no_improve = 0
 
-    for epoch in range(EPOCHS):
+    for epoch in range(args.epochs):
         elapsed = time.time() - start_time
         if elapsed > MAX_TRAIN_SECONDS:
             logging.warning(f"Time limit of {MAX_TRAIN_SECONDS/3600:.2f} hours reached. Stopping training.")
             break
 
         logging.info(
-            f"\n[Epoch {epoch+1}/{EPOCHS}] "
+            f"\n[Epoch {epoch+1}/{args.epochs}] "
             f"Elapsed: {elapsed/60:.1f} min | "
             f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)} | "
             f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}"
@@ -273,7 +283,7 @@ def main():
         # Training
         model.train()
         train_loss, train_preds, train_labels = 0.0, [], []
-        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Training]", leave=False)):
+        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Training]", leave=False)):
             optimizer.zero_grad()
             ids = batch['input_ids'].to(device)
             mask = batch['attention_mask'].to(device)
@@ -299,30 +309,21 @@ def main():
 
         avg_train_loss = train_loss / len(train_loader)
         train_acc = accuracy_score(train_labels, train_preds)
-        writer.add_scalar('Loss/train', avg_train_loss, epoch)
-        writer.add_scalar('Acc/train', train_acc, epoch)
 
         # Log metrics
-        writer.add_scalar('Loss/train', avg_train_loss, epoch)
-        writer.add_scalar('Acc/train', train_acc, epoch)
-        writer.add_scalar('Prec/train', precision_score(train_labels, train_preds, average='macro', zero_division=0), epoch)
-        writer.add_scalar('Rec/train', recall_score(train_labels, train_preds, average='macro', zero_division=0), epoch)
-        writer.add_scalar('F1/train', f1_score(train_labels, train_preds, average='macro', zero_division=0), epoch)
-        writer.add_scalar('LR', optimizer.param_groups[0]['lr'], epoch)
-        
         logging.info(
-            f"Epoch {epoch+1}/{EPOCHS} - Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f} "
+            f"Epoch {epoch+1}/{args.epochs} - Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f} "
             f"(Processed {len(train_labels)} samples in {len(train_loader)} batches)"
         )
 
         # Validation
         logging.info(
-            f"Epoch {epoch+1}/{EPOCHS} - Validation... "
+            f"Epoch {epoch+1}/{args.epochs} - Validation... "
             f"Val samples: {len(val_ds)} | Val batches: {len(val_loader)}"
         )
         model.eval()
         val_loss, val_preds, val_labels = 0.0, [], []
-        for batch_idx, batch in enumerate(tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Validation]", leave=False)):
+        for batch_idx, batch in enumerate(tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Validation]", leave=False)):
             ids = batch['input_ids'].to(device)
             mask = batch['attention_mask'].to(device)
             tab = batch['tabular'].to(device)
@@ -348,17 +349,8 @@ def main():
         val_f1 = f1_score(val_labels, val_preds, average='macro', zero_division=0)
 
         # Log metrics
-        writer.add_scalar('Loss/val', avg_val_loss, epoch)
-        writer.add_scalar('Acc/val', val_acc, epoch)
-        writer.add_scalar('Prec/val', val_prec, epoch)
-        writer.add_scalar('Rec/val', val_rec, epoch)
-        writer.add_scalar('F1/val', val_f1, epoch)
-
-        print_metrics(epoch, avg_train_loss, train_acc, avg_val_loss, val_acc, val_prec, val_rec, val_f1)
-        print_confusion(val_labels, val_preds)
-
         logging.info(
-            f"Epoch {epoch+1}/{EPOCHS} - Val Loss: {avg_val_loss:.4f}, Val Accuracy: {val_acc:.4f}, F1 Score: {val_f1:.4f} "
+            f"Epoch {epoch+1}/{args.epochs} - Val Loss: {avg_val_loss:.4f}, Val Accuracy: {val_acc:.4f}, F1 Score: {val_f1:.4f} "
             f"(Processed {len(val_labels)} samples in {len(val_loader)} batches)"
         )
         
@@ -382,9 +374,14 @@ def main():
             logging.warning(f"Time limit of {MAX_TRAIN_SECONDS/3600:.2f} hours reached. Stopping training.")
             break
 
-    writer.close()
     logging.info("Training complete.")
     logging.info("Best validation loss: %.4f", best_val_loss)
+
+    # --- SageMaker: Save model weights ---
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, "model_weights.pth")
+    torch.save(model.state_dict(), model_path)
+    logging.info(f"Model weights saved to {model_path}")
 
 if __name__ == "__main__":
     main()

@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate-train:
-    name: Validate and Train AI via Kaggle
+    name: Validate and Train AI via SageMaker
     runs-on: ubuntu-latest
 
     steps:
@@ -31,7 +31,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
-          pip install kaggle huggingface-hub
+          pip install awscli boto3 huggingface-hub
 
       - name: Download and Prepare Stock Data
         run: |
@@ -49,84 +49,33 @@ jobs:
         run: |
           python optimize_data.py --input Training_Data/validated_data.csv --output Training_Data/optimized_data.csv
 
-      - name: Set up Kaggle CLI
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload Optimized Data to S3
+        run: |
+          aws s3 cp Training_Data/optimized_data.csv s3://${{ secrets.S3_BUCKET }}/training/optimized_data.csv
+
+      - name: Launch SageMaker Training Job
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
         run: |
-          mkdir -p ~/.kaggle
-          echo "{\"username\":\"$KAGGLE_USERNAME\",\"key\":\"$KAGGLE_KEY\"}" > ~/.kaggle/kaggle.json
-          chmod 600 ~/.kaggle/kaggle.json
+          python launch_sagemaker_training.py \
+            --role-arn "$SAGEMAKER_ROLE_ARN" \
+            --bucket "$S3_BUCKET" \
+            --input-key "training/optimized_data.csv" \
+            --output-key "model/model.tar.gz"
 
-      - name: Create Kaggle Dataset
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      - name: Download Trained Model from S3
         run: |
-          set -e
-          mkdir -p kaggle_dataset
-          cp Training_Data/optimized_data.csv kaggle_dataset/
-          export KAGGLE_TIMESTAMP=$(date +%s)
-          export KAGGLE_DATA_ID="ryanmanzo/stockai-data-$KAGGLE_TIMESTAMP"
-          echo "{\"title\":\"stockai-data-$KAGGLE_TIMESTAMP\",\"id\":\"$KAGGLE_DATA_ID\",\"licenses\":[{\"name\":\"CC0-1.0\"}]}" > kaggle_dataset/dataset-metadata.json
-          kaggle datasets create -p kaggle_dataset --dir-mode zip || { echo "Kaggle dataset creation failed"; cat kaggle_dataset/dataset-metadata.json; exit 1; }
-          echo "$KAGGLE_DATA_ID" > kaggle_dataset_id.txt
-          echo "$KAGGLE_TIMESTAMP" > kaggle_timestamp.txt
-
-      - name: Push Kernel to Kaggle (with retries)
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
-        run: |
-          set -e
-          mkdir -p kaggle_kernel
-          cp train_model.py kaggle_kernel/
-          export KAGGLE_TIMESTAMP=$(cat kaggle_timestamp.txt)
-          export KAGGLE_KERNEL_ID="ryanmanzo/stockai-kernel-$KAGGLE_TIMESTAMP"
-          export KAGGLE_DATA_ID=$(cat kaggle_dataset_id.txt)
-          cat <<EOF > kaggle_kernel/kernel-metadata.json
-{
-  "id": "$KAGGLE_KERNEL_ID",
-  "title": "stockai-kernel-$KAGGLE_TIMESTAMP",
-  "code_file": "train_model.py",
-  "language": "python",
-  "kernel_type": "notebook",
-  "is_private": true,
-  "enable_gpu": true,
-  "dataset_sources": ["$KAGGLE_DATA_ID"]
-}
-EOF
-
-          cat kaggle_kernel/kernel-metadata.json
-
-          ATTEMPT=0
-          MAX_ATTEMPTS=5
-          while ! kaggle kernels push -p kaggle_kernel 2> kaggle_kernel/push_error.log; do
-            ATTEMPT=$((ATTEMPT+1))
-            cat kaggle_kernel/push_error.log
-            if grep -q "Expecting value" kaggle_kernel/push_error.log; then
-              echo "❌ JSON error detected in kernel-metadata.json. Aborting."
-              cat kaggle_kernel/kernel-metadata.json
-              exit 1
-            fi
-            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-              echo "🔥 Kernel push failed after $MAX_ATTEMPTS attempts. Here's your metadata:"
-              cat kaggle_kernel/kernel-metadata.json
-              exit 1
-            fi
-            echo "🤬 Push failed. Trying again in 20 seconds... (attempt $ATTEMPT of $MAX_ATTEMPTS)"
-            sleep 20
-          done
-
-      - name: Wait for Kernel Execution
-        run: |
-          echo "Sleeping 10 minutes to allow training to complete"
-          sleep 600
-
-      - name: Download Trained Model from Kaggle
-        run: |
-          kaggle kernels output ryanmanzo/stockai-kernel -p trained_model
-          ls -la trained_model
+          mkdir -p trained_model
+          aws s3 cp s3://${{ secrets.S3_BUCKET }}/model/model.tar.gz trained_model/model.tar.gz
+          tar -xzf trained_model/model.tar.gz -C trained_model
 
       - name: Upload model weights to Hugging Face
         env:

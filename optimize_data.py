@@ -48,14 +48,18 @@ def main():
     parser.add_argument('--text-col', type=str, default='text', help="Text column name")
     args = parser.parse_args()
 
-    if not os.path.isfile(args.input):
-        logging.error(f"Input file not found: {args.input}")
+    # SageMaker: Use environment variables if present
+    input_path = os.environ.get('SM_CHANNEL_TRAIN', args.input)
+    output_path = os.environ.get('SM_OUTPUT_DATA_DIR', args.output)
+
+    if not os.path.isfile(input_path):
+        logging.error(f"Input file not found: {input_path}")
         exit(1)
 
-    df = pd.read_csv(args.input)
+    df = pd.read_csv(input_path)
     df_optimized = optimize_data_for_ai(df, label_col=args.label_col, text_col=args.text_col)
-    df_optimized.to_csv(args.output, index=False)
-    logging.info(f"Optimized data saved to {args.output}")
+    df_optimized.to_csv(output_path, index=False)
+    logging.info(f"Optimized data saved to {output_path}")
 
 if __name__ == "__main__":
     main()

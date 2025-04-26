@@ -115,10 +115,13 @@ def main():
     parser.add_argument('--output-dir', type=str, default='Training_Data', help='Output folder')
     args = parser.parse_args()
 
+    # SageMaker: Use environment variable if present
+    output_dir = os.environ.get('SM_OUTPUT_DATA_DIR', args.output_dir)
+
     # Use TICKER variable if set (not None or empty)
     symbol = TICKER if TICKER else args.symbol
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     logging.info(f"Downloading {symbol} data from {args.start} to {args.end}...")
     try:
@@ -192,7 +195,7 @@ def main():
     df_scaled = df_scaled[ordered_cols]
 
     # Save to CSV
-    out_path = get_next_data_filename(args.output_dir)
+    out_path = get_next_data_filename(output_dir)
     try:
         df_scaled.to_csv(out_path, index=False)
         logging.info(f"Saved processed data to {out_path} ({len(df_scaled)} rows).")
@@ -203,7 +206,7 @@ def main():
     # --- New: Automatically format for ALBERT after saving ---
     try:
         from format_for_albert import format_dataset_for_albert
-        albert_out = os.path.join(args.output_dir, f"albert_{os.path.basename(out_path)}")
+        albert_out = os.path.join(output_dir, f"albert_{os.path.basename(out_path)}")
         format_dataset_for_albert(out_path, albert_out)
         logging.info(f"Formatted for ALBERT: {albert_out}")
     except Exception as e:
