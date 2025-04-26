@@ -165,29 +165,15 @@ def main():
     input_data_path = os.environ.get('SM_CHANNEL_TRAIN', args.input_data)
     model_dir = os.environ.get('SM_MODEL_DIR', args.model_dir)
 
-    # Kaggle: Use GPU if available, else CPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Using device: {device}")
+    # Check if input_data_path is a directory and append the file name if necessary
+    if os.path.isdir(input_data_path):
+        input_data_path = os.path.join(input_data_path, 'optimized_data.csv')
 
-    # Kaggle: Limit number of threads for reproducibility and avoid OOM
-    cpu_count = min(4, os.cpu_count() or 2)
-    torch.set_num_threads(cpu_count)
-    logging.info(f"Set torch to use {cpu_count} CPU threads.")
+    if not os.path.isfile(input_data_path):
+        logging.error(f"Input data file not found: {input_data_path}")
+        sys.exit(1)
 
-    # Kaggle: Reduce batch size if running on CPU to avoid OOM
-    batch_size = args.batch_size
-    if device.type == "cpu":
-        batch_size = min(args.batch_size, 16)
-        logging.info(f"Running on CPU, batch size set to {batch_size}")
-    else:
-        logging.info(f"Running on CUDA, batch size set to {batch_size}")
-
-    # Hard time limit: 5 hours 50 minutes (in seconds)
-    MAX_TRAIN_SECONDS = 5 * 3600 + 50 * 60  # 21000 seconds
-    start_time = time.time()
-
-    # Load and preprocess data
-    logging.info(f"Loading data from {input_data_path}")
+    # Load the data
     data = pd.read_csv(input_data_path)
     logging.info(f"Loaded {len(data)} rows and {len(data.columns)} columns from {input_data_path}")
     if data.isnull().values.any():
@@ -235,21 +221,21 @@ def main():
     val_ds = StockDataset(X_text_val, X_tab_val, y_val, tokenizer)
 
     # DataLoader optimizations for Kaggle
-    num_workers = min(2, cpu_count)
-    pin_memory = device.type == "cuda"
+    num_workers = min(2, os.cpu_count() or 2)
+    pin_memory = torch.cuda.is_available()
     persistent_workers = pin_memory
 
     train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
+        train_ds, batch_size=args.batch_size, shuffle=True,
         pin_memory=pin_memory, num_workers=num_workers, persistent_workers=persistent_workers
     )
     val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
+        val_ds, batch_size=args.batch_size, shuffle=False,
         pin_memory=pin_memory, num_workers=num_workers, persistent_workers=persistent_workers
     )
 
     logging.info(f"Train loader: {len(train_loader)} batches | Val loader: {len(val_loader)} batches")
-    logging.info(f"Batch size: {batch_size} | Num workers: {num_workers}")
+    logging.info(f"Batch size: {args.batch_size} | Num workers: {num_workers}")
 
     # Initialize model, loss, optimizer, scheduler
     model = MultimodalStockPredictor(tabular_dim=TABULAR_DIM, text_model_name=TEXT_MODEL_NAME).to(device)
@@ -304,7 +290,7 @@ def main():
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(train_loader):
                 logging.info(
                     f"Epoch {epoch+1} Batch {batch_idx+1}/{len(train_loader)}: "
-                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*batch_size}"
+                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*args.batch_size}"
                 )
 
         avg_train_loss = train_loss / len(train_loader)
@@ -339,7 +325,7 @@ def main():
             if (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == len(val_loader):
                 logging.info(
                     f"Epoch {epoch+1} Val Batch {batch_idx+1}/{len(val_loader)}: "
-                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*batch_size}"
+                    f"Loss: {loss.item():.4f} | Samples processed: {(batch_idx+1)*args.batch_size}"
                 )
 
         avg_val_loss = val_loss / len(val_loader)
