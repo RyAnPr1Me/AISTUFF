@@ -64,7 +64,68 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
         drop_cols.extend(low_var_cols)
         logging.info(f"Data optimizer: Dropping {len(low_var_cols)} low-variance columns")
 
-    # Step 3: Remove highly correlated columns (keep only one from each group)
+    # Step 3: Preprocess date columns first
+    logging.info("Checking for date columns that need preprocessing...")
+    date_cols = []
+    
+    # Identify potential date columns
+    for col in df.columns:
+        if col not in non_feature_cols:
+            # Check sample values for date-like strings
+            if df[col].dtype == 'object':
+                sample_val = str(df[col].iloc[0]).lower() if not pd.isna(df[col].iloc[0]) else ""
+                if '1970-01-01' in sample_val or \
+                   any(x in col.lower() for x in ['date', 'time', 'day', 'month', 'year', 'timestamp']):
+                    date_cols.append(col)
+                    logging.info(f"Detected date column: {col}")
+    
+    # Process date columns
+    for col in date_cols:
+        try:
+            # Convert to datetime
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            
+            if not df[col].isna().all():
+                # Extract useful date features and drop original column
+                df[f'{col}_day_of_week'] = df[col].dt.dayofweek
+                df[f'{col}_month'] = df[col].dt.month
+                df[f'{col}_day'] = df[col].dt.day
+                
+                # Extract hour if time data exists
+                if (df[col].dt.hour != 0).any():
+                    df[f'{col}_hour'] = df[col].dt.hour
+                
+                # Is weekend
+                df[f'{col}_is_weekend'] = df[col].dt.dayofweek.isin([5, 6]).astype(int)
+                
+                # Drop original date column
+                drop_cols.append(col)
+                logging.info(f"Extracted features from date column '{col}' and marked for dropping")
+            else:
+                # If conversion entirely failed, mark for dropping
+                drop_cols.append(col)
+                logging.info(f"Date column '{col}' could not be converted, marking for dropping")
+        except Exception as e:
+            # If any error, just drop the column
+            drop_cols.append(col)
+            logging.warning(f"Error processing date column '{col}': {str(e)}")
+    
+    # Drop any remaining non-numeric columns that would cause problems
+    remaining_cols = [col for col in df.columns if col not in drop_cols and col not in non_feature_cols]
+    for col in remaining_cols:
+        if df[col].dtype == 'object':
+            try:
+                # Try numeric conversion
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # If too many NaNs resulted, drop it
+                if df[col].isna().sum() > 0.3 * len(df):
+                    drop_cols.append(col)
+                    logging.info(f"Dropping column '{col}' - too many NaNs after numeric conversion")
+            except:
+                drop_cols.append(col)
+                logging.info(f"Dropping non-numeric column '{col}'")
+
+    # Step 4: Remove highly correlated columns (keep only one from each group)
     feature_cols = [col for col in df.columns if col not in non_feature_cols]
     feature_cols = [col for col in feature_cols if col not in drop_cols]
     
@@ -118,7 +179,7 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
     feature_importances = {}
     kept_features = set(feature_cols)
     
-    # Step 4: Mutual Information-based feature selection
+    # Step 5: Mutual Information-based feature selection
     if use_mutual_info and len(feature_cols) > 5:
         try:
             logging.info("Running mutual information analysis...")
@@ -148,7 +209,7 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
         except Exception as e:
             logging.warning(f"Error in mutual information analysis: {e}")
     
-    # Step 5: Random Forest feature importance
+    # Step 6: Random Forest feature importance
     if use_random_forest and len(feature_cols) > 5:
         try:
             logging.info("Running Random Forest feature importance analysis...")
