@@ -357,3 +357,64 @@ class TFTDataModule(pl.LightningDataModule):
             num_workers=self.num_workers, 
             shuffle=False
         )
+    
+    def get_timeseries_df(self):
+        """
+        Return a clean DataFrame with time series data organized by group
+        
+        Returns:
+            DataFrame with time series data
+        """
+        df = self.df.copy()
+        
+        # Sort by group and time
+        df = df.sort_values(self.group_ids + [self.time_idx])
+        
+        # Convert group columns to string to ensure consistent formatting
+        for col in self.group_ids:
+            if col in df.columns:
+                df[col] = df[col].astype(str)
+        
+        return df
+    
+    def get_prediction_data(self, start_idx=None, end_idx=None):
+        """
+        Get data prepared for prediction
+        
+        Args:
+            start_idx: Optional start time index
+            end_idx: Optional end time index
+            
+        Returns:
+            TimeSeriesDataSet for prediction
+        """
+        # Filter data by time range if specified
+        df = self.df.copy()
+        if start_idx is not None or end_idx is not None:
+            if start_idx is not None:
+                df = df[df[self.time_idx] >= start_idx]
+            if end_idx is not None:
+                df = df[df[self.time_idx] <= end_idx]
+        
+        # Create prediction dataset
+        from pytorch_forecasting.data import TimeSeriesDataSet
+        
+        dataset = TimeSeriesDataSet(
+            df,
+            time_idx=self.time_idx,
+            target=self.target,
+            group_ids=self.group_ids,
+            max_encoder_length=self.max_encoder_length,
+            max_prediction_length=self.max_prediction_length,
+            time_varying_known_reals=self.time_varying_known_reals,
+            time_varying_unknown_reals=self.time_varying_unknown_reals,
+            static_categoricals=self.static_categoricals,
+            static_reals=self.static_reals,
+            categorical_encoders=self.categorical_encoders,
+            add_relative_time_idx=self.add_relative_time,
+            add_target_scales=self.add_target_scales,
+            add_encoder_length=self.add_encoder_length,
+            predict=True
+        )
+        
+        return dataset

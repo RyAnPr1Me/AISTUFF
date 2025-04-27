@@ -25,3 +25,4 @@ openpyxl>=3.0.9
 
 # System utilities
 psutil>=5.8.0
+streamlit

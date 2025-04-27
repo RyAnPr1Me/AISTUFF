@@ -476,3 +476,108 @@ def optimize_hyperparameters(
     logging.info(f"Best {optimization_metric}: {study.best_value}")
     
     return best_params
+
+def plot_forecasts_for_groups(model, data_module, output_dir, max_samples=10):
+    """
+    Generate forecast plots for individual groups
+    
+    Args:
+        model: TFT model
+        data_module: TFT data module
+        output_dir: Output directory for plots
+        max_samples: Maximum number of groups to plot
+        
+    Returns:
+        None (saves plots to disk)
+    """
+    import os
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Get validation dataloader
+    val_dataloader = data_module.val_dataloader()
+    
+    # Make predictions
+    predictions = model.predict(
+        val_dataloader,
+        return_index=True,
+        return_x=True,
+        return_y=True,
+        mode="prediction"
+    )
+    
+    # Get group IDs
+    group_ids = data_module.group_ids
+    
+    # Find unique groups
+    all_indices = predictions.index
+    unique_groups = {}
+    
+    for i, index in enumerate(all_indices[0]):
+        # Get group ID values as a tuple
+        if len(group_ids) == 1:
+            group = index.item() if isinstance(index, torch.Tensor) else index
+        else:
+            group = tuple(idx.item() if isinstance(idx, torch.Tensor) else idx for idx in index)
+            
+        # Store first occurrence of each group
+        if group not in unique_groups and len(unique_groups) < max_samples:
+            unique_groups[group] = i
+    
+    # Plot each unique group
+    for group, idx in unique_groups.items():
+        plt.figure(figsize=(12, 6))
+        
+        # Format title
+        if isinstance(group, tuple):
+            group_title = ", ".join(f"{gid}={g}" for gid, g in zip(group_ids, group))
+        else:
+            group_title = f"{group_ids[0]}={group}"
+        
+        # Get predictions and actual values for this group
+        y_true = predictions.y[idx].cpu().numpy()
+        y_pred = predictions.output[idx].cpu().numpy()
+        
+        # Create time axis (this is a single prediction, so just use indices)
+        time_points = np.arange(len(y_true))
+        
+        # Plot actual values
+        plt.plot(time_points, y_true, 'o-', label='Actual', color='blue')
+        
+        # Plot predictions
+        plt.plot(time_points, y_pred, 'x--', label='Prediction', color='red')
+        
+        # If we have quantiles, plot prediction intervals
+        if hasattr(model, 'loss') and hasattr(model.loss, 'quantiles') and len(model.loss.quantiles) > 1:
+            # Find the quantile indices (typically 0.1, 0.5, 0.9)
+            quantiles = model.loss.quantiles
+            lower_idx = 0  # Assuming the first quantile is the lower bound
+            upper_idx = -1  # Assuming the last quantile is the upper bound
+            
+            # Plot prediction intervals
+            plt.fill_between(
+                time_points, 
+                y_pred[:, lower_idx], 
+                y_pred[:, upper_idx], 
+                color='red', 
+                alpha=0.2, 
+                label=f'{quantiles[lower_idx]}-{quantiles[upper_idx]} PI'
+            )
+        
+        plt.title(f'Forecast for {group_title}')
+        plt.xlabel('Time Step')
+        plt.ylabel('Value')
+        plt.legend()
+        plt.grid(True)
+        
+        # Save plot
+        if isinstance(group, tuple):
+            filename = f"forecast_{'_'.join(str(g) for g in group)}.png"
+        else:
+            filename = f"forecast_{group}.png"
+        plt.savefig(os.path.join(output_dir, filename))
+        plt.close()
+    
+    logging.info(f"Saved {len(unique_groups)} forecast plots to {output_dir}")
