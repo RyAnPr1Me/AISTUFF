@@ -52,8 +52,8 @@ def main():
             role=args.role_arn,
             instance_count=1,
             instance_type=args.instance_type,
-            framework_version='1.11.0',
-            py_version='py310',
+            framework_version='1.11.0',  # Supported PyTorch version
+            py_version='py38',           # <-- Changed from 'py310' to 'py38'
             output_path=s3_output,
             sagemaker_session=session,
             hyperparameters={
