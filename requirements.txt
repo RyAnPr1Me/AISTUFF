@@ -27,3 +27,4 @@ openpyxl>=3.0.9
 psutil>=5.8.0
 streamlit
 yfinance
+sagemaker
