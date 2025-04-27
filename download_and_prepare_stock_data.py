@@ -26,25 +26,56 @@ def compute_technical_indicators(df):
     df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
     # MACD
     df['MACD'] = df['EMA_12'] - df['EMA_26']
+    df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_hist'] = df['MACD'] - df['MACD_signal']
+    
     # RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / (loss + 1e-10)
     df['RSI_14'] = 100 - (100 / (1 + rs))
+    
     # Bollinger Bands
     ma20 = df['Close'].rolling(window=20).mean()
     std20 = df['Close'].rolling(window=20).std()
     df['BB_upper'] = ma20 + 2 * std20
     df['BB_lower'] = ma20 - 2 * std20
+    df['BB_width'] = (df['BB_upper'] - df['BB_lower']) / ma20  # Bollinger Band width
+    df['BB_pct'] = (df['Close'] - df['BB_lower']) / (df['BB_upper'] - df['BB_lower'] + 1e-10)  # Position within bands
+    
     # Stochastic Oscillator
     low14 = df['Low'].rolling(window=14).min()
     high14 = df['High'].rolling(window=14).max()
     df['Stoch_%K'] = 100 * (df['Close'] - low14) / (high14 - low14 + 1e-10)
     df['Stoch_%D'] = df['Stoch_%K'].rolling(window=3).mean()
+    
+    # Average True Range (ATR)
+    tr1 = abs(df['High'] - df['Low'])
+    tr2 = abs(df['High'] - df['Close'].shift())
+    tr3 = abs(df['Low'] - df['Close'].shift())
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    df['ATR_14'] = tr.rolling(window=14).mean()
+    
+    # On-Balance Volume (OBV)
+    df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
+    
+    # Price Rate of Change (ROC)
+    df['ROC_10'] = df['Close'].pct_change(periods=10) * 100
+    
     # Lag features
     df['Close_lag1'] = df['Close'].shift(1)
     df['Close_lag5'] = df['Close'].shift(5)
+    df['Volume_lag1'] = df['Volume'].shift(1)
+    df['Return_1d'] = df['Close'].pct_change(periods=1)
+    
+    # Volatility features
+    df['Volatility_10d'] = df['Return_1d'].rolling(window=10).std() * np.sqrt(252)  # Annualized
+    
+    # Day of week (0=Monday, 4=Friday)
+    if 'Date' in df.columns:
+        df['DayOfWeek'] = pd.to_datetime(df['Date']).dt.dayofweek
+    
     return df
 
 def create_targets(df):
@@ -82,28 +113,72 @@ def get_next_data_filename(folder):
 
 def add_text_column(df, symbol):
     """
-    Add a 'text' column for compatibility with the data validator.
-    Uses a template string with the date and symbol.
+    Add a rich 'text' column for compatibility with the data validator.
+    Creates a detailed narrative about the stock performance.
     """
     if 'text' not in df.columns:
-        # Try to use 'Date' if present, else index
+        texts = []
+        # Convert date to datetime if not already
         if 'Date' in df.columns:
-            date_col = df['Date'].astype(str)
-        else:
-            date_col = df.index.astype(str)
-        # Ensure 'Close' and 'Weekly_Return' are Series, not DataFrames
-        close = df['Close']
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-        weekly_return = df['Weekly_Return']
-        if isinstance(weekly_return, pd.DataFrame):
-            weekly_return = weekly_return.iloc[:, 0]
-        # Compose a simple text headline for each row
-        df['text'] = (
-            symbol.upper() + " stock data for " + date_col +
-            ". Close: " + close.round(2).astype(str) +
-            ", Weekly return: " + weekly_return.round(4).astype(str)
-        )
+            df['Date'] = pd.to_datetime(df['Date'])
+            
+        for i, row in df.iterrows():
+            # Get price movement description
+            if i > 0:
+                prev_close = df.iloc[i-1]['Close']
+                price_change = ((row['Close'] - prev_close) / prev_close) * 100
+                if price_change > 1.5:
+                    movement = "surged strongly"
+                elif price_change > 0.5:
+                    movement = "increased"
+                elif price_change > -0.5:
+                    movement = "remained stable"
+                elif price_change > -1.5:
+                    movement = "decreased"
+                else:
+                    movement = "fell sharply"
+            else:
+                movement = "traded at"
+                
+            # Get technical indicator insights
+            rsi_signal = ""
+            if 'RSI_14' in row and not pd.isna(row['RSI_14']):
+                if row['RSI_14'] > 70:
+                    rsi_signal = " RSI indicates the stock may be overbought."
+                elif row['RSI_14'] < 30:
+                    rsi_signal = " RSI indicates the stock may be oversold."
+                    
+            # Get volume insight
+            volume_signal = ""
+            if 'Volume' in row and i > 0 and 'Volume' in df.iloc[i-1]:
+                prev_volume = df.iloc[i-1]['Volume']
+                vol_change = ((row['Volume'] - prev_volume) / prev_volume) * 100
+                if vol_change > 30:
+                    volume_signal = " Trading volume was significantly higher than previous day."
+                elif vol_change < -30:
+                    volume_signal = " Trading volume was significantly lower than previous day."
+            
+            # Create forecast hint (this will help the model learn the target)
+            if row['Weekly_Return'] > 0.03:
+                forecast = "Outlook: Strong bullish trend expected in the next week."
+            elif row['Weekly_Return'] > 0:
+                forecast = "Outlook: Slight upward movement may continue."
+            elif row['Weekly_Return'] > -0.03:
+                forecast = "Outlook: Mild bearish pressure in the short term."
+            else:
+                forecast = "Outlook: Significant downward pressure expected."
+                
+            # Format date nicely
+            date_str = row['Date'].strftime('%B %d, %Y') if isinstance(row['Date'], pd.Timestamp) else str(row['Date'])
+            
+            # Create comprehensive text
+            text = (f"{symbol.upper()} {movement} ${row['Close']:.2f} on {date_str}. "
+                   f"Day range: ${row['Low']:.2f} to ${row['High']:.2f}.{rsi_signal}{volume_signal} {forecast}")
+            
+            texts.append(text)
+            
+        df['text'] = texts
+    
     return df
 
 def main():
@@ -171,11 +246,16 @@ def main():
     # Select features and columns to keep
     feature_cols = [
         'Open', 'High', 'Low', 'Close', 'Volume',
-        'SMA_5', 'SMA_30', 'EMA_12', 'EMA_26', 'MACD',
-        'RSI_14', 'BB_upper', 'BB_lower',
-        'Stoch_%K', 'Stoch_%D',
-        'Close_lag1', 'Close_lag5'
+        'SMA_5', 'SMA_30', 'EMA_12', 'EMA_26', 'MACD', 'MACD_signal', 'MACD_hist',
+        'RSI_14', 'BB_upper', 'BB_lower', 'BB_width', 'BB_pct',
+        'Stoch_%K', 'Stoch_%D', 'ATR_14', 'OBV', 'ROC_10',
+        'Close_lag1', 'Close_lag5', 'Volume_lag1', 'Return_1d', 'Volatility_10d'
     ]
+    
+    # Add day of week if present
+    if 'DayOfWeek' in df.columns:
+        feature_cols.append('DayOfWeek')
+        
     keep_cols = ['Date'] + feature_cols + ['Future_Close', 'Weekly_Return', 'label']
 
     # Drop rows with missing values (from rolling calculations and lags)
