@@ -190,23 +190,38 @@ def main():
     parser.add_argument('--output-dir', type=str, default='Training_Data', help='Output folder')
     args = parser.parse_args()
 
-    # SageMaker: Use environment variable if present
     output_dir = os.environ.get('SM_OUTPUT_DATA_DIR', args.output_dir)
-
-    # Use TICKER variable if set (not None or empty)
     symbol = TICKER if TICKER else args.symbol
 
     os.makedirs(output_dir, exist_ok=True)
 
     logging.info(f"Downloading {symbol} data from {args.start} to {args.end}...")
-    try:
-        df = yf.download(symbol, start=args.start, end=args.end)
-    except Exception as e:
-        logging.error(f"Failed to download data: {e}")
-        sys.exit(1)
+
+    # --- Fix: yfinance sometimes fails for future dates or weekends, so adjust end date if needed ---
+    import datetime
+    today = datetime.datetime.today()
+    end_date = min(datetime.datetime.strptime(args.end, "%Y-%m-%d"), today)
+    start_date = datetime.datetime.strptime(args.start, "%Y-%m-%d")
+    if end_date > today:
+        end_date = today
+    if start_date >= end_date:
+        start_date = end_date - datetime.timedelta(days=365*2)  # fallback to last 2 years
+
+    # yfinance cannot download future data, so always use today or last market day as end
+    df = yf.download(symbol, start=start_date.strftime("%Y-%m-%d"), end=(end_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d"), progress=False)
+
+    # If still empty, try upper-case ticker (sometimes yfinance is case-sensitive)
+    if df.empty and symbol != symbol.upper():
+        logging.info(f"Retrying with upper-case ticker: {symbol.upper()}")
+        df = yf.download(symbol.upper(), start=start_date.strftime("%Y-%m-%d"), end=(end_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d"), progress=False)
+
+    # If still empty, try lower-case ticker
+    if df.empty and symbol != symbol.lower():
+        logging.info(f"Retrying with lower-case ticker: {symbol.lower()}")
+        df = yf.download(symbol.lower(), start=start_date.strftime("%Y-%m-%d"), end=(end_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d"), progress=False)
 
     if df.empty:
-        logging.error("No data downloaded. Check symbol and date range.")
+        logging.error("No data downloaded. Check symbol and date range. (Hint: yfinance cannot download future data, and ticker must be valid/correct case.)")
         sys.exit(1)
 
     df = df.reset_index()
