@@ -11,7 +11,7 @@ def main():
     parser.add_argument('--bucket', type=str, required=True, help='S3 bucket name')
     parser.add_argument('--input-key', type=str, required=True, help='S3 key for training data')
     parser.add_argument('--output-key', type=str, required=True, help='S3 key for model output')
-    parser.add_argument('--instance-type', type=str, default='ml.m5.xlarge', help='SageMaker instance type')
+    parser.add_argument('--instance-type', type=str, default='ml.m5.2xlarge', help='SageMaker instance type')
     parser.add_argument('--image-uri', type=str, default='', help='(Optional) Custom Docker image URI')
     parser.add_argument('--job-name', type=str, default=f'stockai-train-{int(time.time())}', help='SageMaker training job name')
     args = parser.parse_args()
