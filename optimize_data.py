@@ -356,10 +356,11 @@ def main():
         generate_report=not args.disable_report
     )
     
-    # Data augmentation: inject Gaussian noise to numeric features to help prevent overfitting
+    # Define non_feature_cols for augmentation
+    non_feature_cols = [args.label_col, args.text_col]
     df = augment_with_gaussian_noise(df, noise_std=0.01, noise_prob=0.5, exclude_cols=non_feature_cols)
     logging.info("Applied Gaussian noise augmentation to numeric features.")
-
+    
     df_optimized.to_csv(output_path, index=False)
     logging.info(f"Optimized data saved to {output_path}")
 
