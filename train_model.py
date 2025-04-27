@@ -285,7 +285,11 @@ def main():
             tab = batch['tabular'].to(device)
             lbl = batch['label'].to(device)
 
-            logits = model({'input_ids': ids, 'attention_mask': mask}, tab)
+            # Create text_inputs dict as expected by the model
+            text_inputs = {'input_ids': ids, 'attention_mask': mask}
+            
+            # Forward pass using the correct parameter order
+            logits = model(text_inputs, tab)
             loss = loss_fn(logits, lbl)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
