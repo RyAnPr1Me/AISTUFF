@@ -12,19 +12,22 @@ transformers>=4.8.0
 tokenizers>=0.10.3
 
 # Time series specific
-pytorch-forecasting>=0.10.3
-pytorch-lightning>=1.5.0
-statsmodels>=0.13.0
+pytorch-forecasting==0.10.3  # Pin specific version for compatibility
+pytorch-lightning==1.5.0     # Pin specific version for compatibility
+statsmodels==0.13.2
 
 # Hyperparameter optimization
-optuna>=2.10.0
+optuna==2.10.1
 
 # Data processing
-pyarrow>=5.0.0
-openpyxl>=3.0.9
+pyarrow==8.0.0
+openpyxl==3.0.10
 
 # System utilities
-psutil>=5.8.0
-streamlit
-yfinance
-sagemaker
+psutil==5.9.0
+streamlit==1.10.0
+yfinance==0.1.74
+sagemaker==2.93.0
+
+# Add direct dependencies that might be missing
+prettytable==3.3.0
