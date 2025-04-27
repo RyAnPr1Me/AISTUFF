@@ -1,49 +1,136 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoConfig,AutoTokenizer
-from .fusion import GatedFusion, CrossModalAttention
-from .audio_encoder import AudioEncoder
-from .time_series_encoder import TimeSeriesEncoder
-from .interpretability import compute_feature_importance
+import logging
+import traceback
+
+# Configure more robust logging for the model
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
+# Safely attempt to import transformer modules
+try:
+    from transformers import AutoModel, AutoConfig, AutoTokenizer
+except ImportError:
+    logging.error("Failed to import transformers. Make sure transformers is installed.")
+    AutoModel, AutoConfig, AutoTokenizer = None, None, None
+
+# Safely import local modules with fallbacks
+try:
+    from .fusion import GatedFusion, CrossModalAttention
+except ImportError:
+    logging.warning("Couldn't import fusion modules from relative path, trying absolute import...")
+    try:
+        from src.models.fusion import GatedFusion, CrossModalAttention
+    except ImportError:
+        logging.error("Failed to import fusion modules. Using dummy fallbacks.")
+        
+        # Define simple fallbacks for critical classes
+        class GatedFusion(nn.Module):
+            def __init__(self, input_dims, output_dim):
+                super().__init__()
+                self.linears = nn.ModuleList([nn.Linear(d, output_dim) for d in input_dims])
+                
+            def forward(self, features):
+                outputs = [linear(feat) for linear, feat in zip(self.linears, features)]
+                return torch.stack(outputs).sum(dim=0)
+
+        class CrossModalAttention(nn.Module):
+            def __init__(self, dim1, dim2, output_dim):
+                super().__init__()
+                self.proj1 = nn.Linear(dim1, output_dim)
+                self.proj2 = nn.Linear(dim2, output_dim)
+                
+            def forward(self, x1, x2):
+                return self.proj1(x1) + self.proj2(x2)
+
+try:
+    from .audio_encoder import AudioEncoder
+except ImportError:
+    try:
+        from src.models.audio_encoder import AudioEncoder
+    except ImportError:
+        logging.warning("Failed to import AudioEncoder. Using fallback.")
+        
+        class AudioEncoder(nn.Module):
+            def __init__(self, input_dim, hidden_dim, output_dim):
+                super().__init__()
+                self.net = nn.Sequential(
+                    nn.Linear(input_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, output_dim)
+                )
+                
+            def forward(self, x):
+                return self.net(x)
+
+try:
+    from .time_series_encoder import TimeSeriesEncoder
+except ImportError:
+    try:
+        from src.models.time_series_encoder import TimeSeriesEncoder
+    except ImportError:
+        logging.warning("Failed to import TimeSeriesEncoder. Using fallback.")
+        
+        class TimeSeriesEncoder(nn.Module):
+            def __init__(self, input_dim, hidden_dim, output_dim):
+                super().__init__()
+                self.net = nn.Sequential(
+                    nn.Linear(input_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, output_dim)
+                )
+                
+            def forward(self, x):
+                return self.net(x)
+
+try:
+    from .interpretability import compute_feature_importance
+except ImportError:
+    try: 
+        from src.models.interpretability import compute_feature_importance
+    except ImportError:
+        logging.warning("Failed to import compute_feature_importance. Using fallback.")
+        
+        def compute_feature_importance(model, inputs, targets, loss_fn):
+            return {"text_inputs": torch.ones(1), "tabular_inputs": torch.ones(1)}
 
 class MultimodalStockPredictor(nn.Module):
     def __init__(self, 
-                 text_model_name="albert-large-v2",
-                 vision_model_name=None,
-                 tabular_dim=64,
-                 audio_dim=None,
-                 time_series_dim=None,
-                 hidden_dim=1024,
-                 num_labels=2,  # <-- Set default to 2 for binary classification
-                 fusion_layers=2,
-                 activation=nn.ReLU,
-                 tabular_dropout=0.1,
-                 fusion_dropout=0.2,
-                 fusion_layernorm=True,
-                 use_attention_fusion=False,
-                 use_residual_fusion=False,
-                 use_audio=False,
-                 use_time_series=False,
-                 audio_hidden_dim=128,
-                 audio_out_dim=128,
-                 time_series_hidden_dim=128,
-                 time_series_out_dim=128,
-                 audio_encoder=None,
-                 time_series_encoder=None,
-                 freeze_text_encoder=False,
-                 freeze_vision_encoder=False,
-                 use_self_attention=True,
-                 self_attention_heads=8,
-                 self_attention_layers=2,
-                 use_dropout_scheduler=True,
-                 dropout_scheduler_max=0.5,
-                 dropout_scheduler_min=0.1,
-                 use_stochastic_depth=True,
-                 stochastic_depth_prob=0.2,
-                 use_ensemble=False,
-                 ensemble_size=3,
-                 fusion_type='concat',
-                 use_mixed_precision=False):
+                text_model_name="albert-base-v2",  # Changed default from large to base
+                vision_model_name=None,
+                tabular_dim=64,
+                audio_dim=None,
+                time_series_dim=None,
+                hidden_dim=1024,
+                num_labels=2,  # <-- Set default to 2 for binary classification
+                fusion_layers=2,
+                activation=nn.ReLU,
+                tabular_dropout=0.1,
+                fusion_dropout=0.2,
+                fusion_layernorm=True,
+                use_attention_fusion=False,
+                use_residual_fusion=False,
+                use_audio=False,
+                use_time_series=False,
+                audio_hidden_dim=128,
+                audio_out_dim=128,
+                time_series_hidden_dim=128,
+                time_series_out_dim=128,
+                audio_encoder=None,
+                time_series_encoder=None,
+                freeze_text_encoder=False,
+                freeze_vision_encoder=False,
+                use_self_attention=True,
+                self_attention_heads=8,
+                self_attention_layers=2,
+                use_dropout_scheduler=True,
+                dropout_scheduler_max=0.5,
+                dropout_scheduler_min=0.1,
+                use_stochastic_depth=True,
+                stochastic_depth_prob=0.2,
+                use_ensemble=False,
+                ensemble_size=3,
+                fusion_type='concat',
+                use_mixed_precision=False):
         """
         Args:
             fusion_type (str): 'concat', 'gated', or 'cross_attention'.
