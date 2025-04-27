@@ -135,18 +135,19 @@ class MultimodalStockPredictor(nn.Module):
         Args:
             fusion_type (str): 'concat', 'gated', or 'cross_attention'.
             use_mixed_precision (bool): Enable mixed precision training.
-            ...existing code...
         """
-          # Load the tokenizer for ALBERT
-        self.tokenizer = AutoTokenizer.from_pretrained(text_model_name)
-        super().__init__()
-        self.tabular_dim = tabular_dim  # Save for runtime check
-        # Text encoder (large transformer)
-        self.text_config = AutoConfig.from_pretrained(text_model_name)
-        self.text_encoder = AutoModel.from_pretrained(text_model_name, config=self.text_config)
-        if freeze_text_encoder:
-            for param in self.text_encoder.parameters():
-                param.requires_grad = False
+        # Only load Hugging Face text model/tokenizer if not using TFT
+        if text_model_name and text_model_name.lower() != "temporalfusiontransformer":
+            self.tokenizer = AutoTokenizer.from_pretrained(text_model_name)
+            self.text_config = AutoConfig.from_pretrained(text_model_name)
+            self.text_encoder = AutoModel.from_pretrained(text_model_name, config=self.text_config)
+            if freeze_text_encoder:
+                for param in self.text_encoder.parameters():
+                    param.requires_grad = False
+        else:
+            self.tokenizer = None
+            self.text_config = None
+            self.text_encoder = None
         
         # Optional: Vision encoder (for chart images, etc.)
         if vision_model_name:

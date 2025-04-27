@@ -277,11 +277,9 @@ def main():
     # (No need to call optimize_data_for_ai here, already optimized)
 
     # Tokenizer
-    if not args.tft:
+    tokenizer = None
+    if hasattr(args, 'tft') and not args.tft:
         tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
-    else:
-        tokenizer = None
-
     # Process tabular features
     forbidden_features = {'future_close', 'weekly_return'}
     feature_cols = [col for col in data.columns if col not in ['text', 'label'] and col not in forbidden_features]
@@ -503,7 +501,8 @@ def main():
             logging.error("Make sure pytorch-forecasting and pytorch-lightning are installed")
             raise
     else:
-        try:
+        # Only use tokenizer in non-TFT mode
+        if not args.tft:
             train_ds = MemoryEfficientStockDataset(X_text_train, X_tab_train, y_train, tokenizer)
             val_ds = MemoryEfficientStockDataset(X_text_val, X_tab_val, y_val, tokenizer)
 
