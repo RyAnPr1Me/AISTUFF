@@ -48,6 +48,7 @@ TEXT_MODEL_NAME = "albert-base-v2"
 TABULAR_DIM = 64
 EARLY_STOPPING_PATIENCE = 5
 MAX_SEQ_LEN = 128  # Max sequence length for text
+MAX_TRAIN_SECONDS = 4 * 60 * 60  # 4 hours time limit for training
 
 # Use optimized data as input
 OPTIMIZED_DATA_PATH = "Training_Data/optimized_data.csv"
