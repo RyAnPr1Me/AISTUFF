@@ -29,3 +29,14 @@ jobs:
       - name: Run stock data preparation script
         run: |
           python download_and_prepare_stock_data.py
+
+      - name: Commit generated data to Training_Data
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add Training_Data/
+          git diff --cached --quiet || git commit -m "Auto-update Training_Data from stock data prep"
+          git push
+        env:
+          # Needed for push permission
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
