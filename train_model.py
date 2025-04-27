@@ -277,7 +277,10 @@ def main():
     # (No need to call optimize_data_for_ai here, already optimized)
 
     # Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
+    if not args.tft:
+        tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
+    else:
+        tokenizer = None
 
     # Process tabular features
     forbidden_features = {'future_close', 'weekly_return'}
