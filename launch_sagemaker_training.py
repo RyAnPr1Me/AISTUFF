@@ -50,7 +50,7 @@ def main():
             hyperparameters={
                 'input-data': '/opt/ml/input/data/train/optimized_data.csv',
                 'epochs': 5,
-                'batch-size': 32,
+                'batch-size': 16,
                 'lr': 1e-4,
                 'disable_mixed_precision': 'true',  # Disable mixed precision which might cause issues
                 'disable_self_attention': 'true',   # Disable self attention which might use torch.distributed
