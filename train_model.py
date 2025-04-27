@@ -1,8 +1,9 @@
 import os
 import sys
 
-# Enable GPU optimization with SageMaker compatibility
-os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"  # Reduced logging verbosity
+# Enable GPU optimization with even more aggressive memory saving
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"  # Limit CUDA memory splits
 
 try:
     import warnings
@@ -12,6 +13,7 @@ try:
     import pandas as pd
     import logging
     import traceback
+    import gc  # For explicit garbage collection
     from transformers import AutoTokenizer, AutoConfig
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import train_test_split
@@ -28,7 +30,6 @@ try:
     print(f"PyTorch version: {torch.__version__}")
     print(f"CUDA available: {torch.cuda.is_available()}")
     print(f"Working directory: {os.getcwd()}")
-    print(f"Directory contents: {os.listdir('.')}")
 except Exception as e:
     print(f"CRITICAL IMPORT ERROR: {e}")
     traceback.print_exc()
@@ -45,25 +46,25 @@ if AMP_AVAILABLE:
     print("Automatic Mixed Precision (AMP) is available and will be used")
 
 #========================================================================
-# SageMaker-compatible train model script with performance optimizations
+# Low-memory SageMaker-compatible train model script
 #========================================================================
 
-# Paths and configurations - SageMaker friendly defaults
+# Paths and configurations - Low memory settings
 VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
 
-# Training parameters - optimized defaults for SageMaker
-BATCH_SIZE = 32  # More conservative for SageMaker
-GRADIENT_ACCUMULATION_STEPS = 2  # Reduced for SageMaker compatibility
+# Training parameters - Low memory optimized
+BATCH_SIZE = 16  # Smaller batch size for lower memory usage
+GRADIENT_ACCUMULATION_STEPS = 4  # Use more gradient accumulation steps to compensate for smaller batch
 EPOCHS = 5
 LR = 1e-4
 TEXT_MODEL_NAME = "albert-base-v2"  # SageMaker compatible model
-TABULAR_DIM = 64
+TABULAR_DIM = 32  # Reduced dimension for tabular data
 
-# Performance optimizations - SageMaker safe settings
+# Performance optimizations - Low memory settings
 USE_AMP = True  # Will be auto-disabled if not available
-FREEZE_TRANSFORMER_LAYERS = True  # Speed up training in SageMaker
-TOKENIZER_BATCH_SIZE = 512  # Reduced for SageMaker memory limits
-MAX_SEQ_LEN = 80  # Balanced for accuracy and speed
+FREEZE_TEXT_ENCODER = True  # Completely freeze text encoder for lowest memory usage
+TOKENIZER_BATCH_SIZE = 128  # Much smaller batch size for tokenization
+MAX_SEQ_LEN = 64  # Reduced sequence length for lower memory
 EARLY_STOPPING_PATIENCE = 3
 MAX_TRAIN_SECONDS = 3 * 60 * 60  # 3 hour time limit for SageMaker
 
@@ -78,70 +79,32 @@ def setup_logging():
     logger = logging.getLogger()
     logger.addHandler(handler)
 
-class StockDataset(Dataset):
+class MemoryEfficientStockDataset(Dataset):
+    """Memory efficient dataset that tokenizes on-the-fly"""
     def __init__(self, texts, tabular_data, labels, tokenizer, max_len=MAX_SEQ_LEN):
         self.tokenizer = tokenizer
         self.texts = texts
         self.tabular_data = tabular_data
         self.labels = labels
         self.max_len = max_len
-        
-        # Pre-tokenize all texts at initialization for better performance
-        # Use batch processing to avoid memory issues on SageMaker
-        self.encodings = self._batch_tokenize(texts)
-
-    def _batch_tokenize(self, texts):
-        """Batch tokenization optimized for SageMaker"""
-        encodings = []
-        for i in range(0, len(texts), TOKENIZER_BATCH_SIZE):
-            batch_texts = texts[i:i+TOKENIZER_BATCH_SIZE]
-            try:
-                batch_encodings = self.tokenizer(
-                    batch_texts,
-                    padding='max_length',
-                    truncation=True,
-                    max_length=self.max_len,
-                    return_tensors='pt'
-                )
-                
-                # Split batch result into individual encodings
-                for j in range(len(batch_texts)):
-                    encodings.append({
-                        'input_ids': batch_encodings['input_ids'][j],
-                        'attention_mask': batch_encodings['attention_mask'][j]
-                    })
-            except Exception as e:
-                print(f"Error tokenizing batch {i}: {e}")
-                # Fallback to individual tokenization if batch fails
-                for text in batch_texts:
-                    try:
-                        encoding = self.tokenizer(
-                            text,
-                            padding='max_length',
-                            truncation=True,
-                            max_length=self.max_len,
-                            return_tensors='pt'
-                        )
-                        encodings.append({
-                            'input_ids': encoding['input_ids'].squeeze(0),
-                            'attention_mask': encoding['attention_mask'].squeeze(0)
-                        })
-                    except:
-                        # If individual tokenization fails, create empty tensors
-                        encodings.append({
-                            'input_ids': torch.zeros(self.max_len, dtype=torch.long),
-                            'attention_mask': torch.zeros(self.max_len, dtype=torch.long)
-                        })
-                
-        return encodings
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
+        # On-the-fly tokenization to save memory
+        text = self.texts[idx]
+        encoded = self.tokenizer(
+            text,
+            padding='max_length',
+            truncation=True,
+            max_length=self.max_len,
+            return_tensors='pt'
+        )
+        
         return {
-            "input_ids": self.encodings[idx]['input_ids'],
-            "attention_mask": self.encodings[idx]['attention_mask'],
+            "input_ids": encoded["input_ids"].squeeze(0),
+            "attention_mask": encoded["attention_mask"].squeeze(0),
             "tabular": self.tabular_data[idx],
             "label": self.labels[idx]
         }
@@ -300,8 +263,8 @@ def main():
         logging.info(f"Train set: {len(X_text_train)} | Validation set: {len(X_text_val)}")
         logging.info(f"Tabular feature shape: {tabular_data.shape}")
 
-        train_ds = StockDataset(X_text_train, X_tab_train, y_train, tokenizer)
-        val_ds = StockDataset(X_text_val, X_tab_val, y_val, tokenizer)
+        train_ds = MemoryEfficientStockDataset(X_text_train, X_tab_train, y_train, tokenizer)
+        val_ds = MemoryEfficientStockDataset(X_text_val, X_tab_val, y_val, tokenizer)
 
         # DataLoader optimizations for Kaggle
         num_workers = min(2, os.cpu_count() or 2)
@@ -331,7 +294,7 @@ def main():
             ).to(device)
             
             # Freeze transformer layers for faster training if specified
-            if FREEZE_TRANSFORMER_LAYERS and hasattr(model, 'text_encoder'):
+            if FREEZE_TEXT_ENCODER and hasattr(model, 'text_encoder'):
                 # Keep only the last 2 layers unfrozen for fine-tuning
                 if hasattr(model.text_encoder, 'encoder'):
                     # For ALBERT architecture
