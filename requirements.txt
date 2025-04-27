@@ -8,8 +8,8 @@ seaborn>=0.11.0
 tqdm>=4.62.0
 
 # Transformers and NLP
-transformers>=4.8.0
-tokenizers>=0.10.3
+transformers==4.8.2  # Use version compatible with tokenizers and does not require Rust
+tokenizers==0.10.3    # Use version with pre-built wheels for Python 3.8
 
 # Time series specific
 pytorch-forecasting==0.10.3  # Pin specific version for compatibility
