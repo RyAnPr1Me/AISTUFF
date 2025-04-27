@@ -65,8 +65,8 @@ USE_AMP = True  # Will be auto-disabled if not available
 FREEZE_TEXT_ENCODER = True  # Completely freeze text encoder for lowest memory usage
 TOKENIZER_BATCH_SIZE = 128  # Much smaller batch size for tokenization
 MAX_SEQ_LEN = 64  # Reduced sequence length for lower memory
-EARLY_STOPPING_PATIENCE = 3
-MAX_TRAIN_SECONDS = 3 * 60 * 60  # 3 hour time limit for SageMaker
+EARLY_STOPPING_PATIENCE = 2  # Set patience to 2 epochs for early stopping
+NOISE_STD = 0.01  # Standard deviation for Gaussian noise injection
 
 # Input data path - SageMaker compatible
 OPTIMIZED_DATA_PATH = "Training_Data/optimized_data.csv"
@@ -438,16 +438,12 @@ def main():
             logging.warning(f"Error when attempting to use torch.compile: {e}")
         
         loss_fn = torch.nn.CrossEntropyLoss()
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)  # L2 regularization
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2, factor=0.5, verbose=True)
 
-        # Set up mixed precision training if available
         scaler = GradScaler() if AMP_AVAILABLE and USE_AMP else None
-        
         best_val_loss = float('inf')
         epochs_no_improve = 0
-        
-        # Track training progress
         history = {
             'train_loss': [], 'train_acc': [],
             'val_loss': [], 'val_acc': [],
@@ -467,14 +463,9 @@ def main():
                 f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}"
             )
 
-            # Training
             model.train()
             train_loss, train_preds, train_labels = 0.0, [], []
-            
-            # Reset gradients at the beginning of each epoch
             optimizer.zero_grad()
-            
-            # Use tqdm for progress bar but with minimal output to reduce overhead
             progress_bar = tqdm(
                 train_loader, 
                 desc=f"Epoch {epoch+1}/{args.epochs}",
@@ -482,17 +473,16 @@ def main():
                 ncols=80,
                 disable=False
             )
-            
-            # Gradient accumulation variables
             steps_since_update = 0
             accumulated_loss = 0
-            
             for batch_idx, batch in enumerate(progress_bar):
-                # Move batch to device
                 ids = batch['input_ids'].to(device)
                 mask = batch['attention_mask'].to(device)
                 tab = batch['tabular'].to(device)
                 lbl = batch['label'].to(device)
+                # Inject small Gaussian noise into tabular features during training
+                if model.training:
+                    tab = tab + torch.randn_like(tab) * NOISE_STD
                 text_inputs = {'input_ids': ids, 'attention_mask': mask}
                 
                 # Mixed precision forward pass

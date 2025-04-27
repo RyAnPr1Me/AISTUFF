@@ -297,6 +297,29 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
     
     return df_optimized
 
+def augment_with_gaussian_noise(df, noise_std=0.01, noise_prob=0.5, exclude_cols=None):
+    """
+    Augment numeric columns by injecting small Gaussian noise to a random subset of rows.
+    Args:
+        df: DataFrame to augment
+        noise_std: Standard deviation of the Gaussian noise
+        noise_prob: Probability of applying noise to each row
+        exclude_cols: Columns to exclude from augmentation
+    Returns:
+        Augmented DataFrame
+    """
+    df_aug = df.copy()
+    if exclude_cols is None:
+        exclude_cols = []
+    numeric_cols = df_aug.select_dtypes(include=[float, int, np.number]).columns
+    numeric_cols = [col for col in numeric_cols if col not in exclude_cols]
+    if len(numeric_cols) == 0:
+        return df_aug
+    mask = np.random.rand(len(df_aug)) < noise_prob
+    noise = np.random.normal(0, noise_std, size=(mask.sum(), len(numeric_cols)))
+    df_aug.loc[mask, numeric_cols] += noise
+    return df_aug
+
 def main():
     setup_logging()
     parser = argparse.ArgumentParser(description="Optimize tabular data for AI model training.")
@@ -333,6 +356,10 @@ def main():
         generate_report=not args.disable_report
     )
     
+    # Data augmentation: inject Gaussian noise to numeric features to help prevent overfitting
+    df = augment_with_gaussian_noise(df, noise_std=0.01, noise_prob=0.5, exclude_cols=non_feature_cols)
+    logging.info("Applied Gaussian noise augmentation to numeric features.")
+
     df_optimized.to_csv(output_path, index=False)
     logging.info(f"Optimized data saved to {output_path}")
 
