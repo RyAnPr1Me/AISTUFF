@@ -8,6 +8,7 @@ warnings.filterwarnings("ignore")
 import torch
 import pandas as pd
 import logging
+import sys
 from transformers import AutoTokenizer
 from src.models.stock_ai import MultimodalStockPredictor
 from torch.utils.data import DataLoader, Dataset
@@ -18,6 +19,9 @@ from tqdm import tqdm
 import numpy as np
 import time
 import argparse
+
+# Define device for PyTorch
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #========================================================================
 # Train Model Script with Performance Optimizations and Informative Logging
@@ -162,6 +166,9 @@ def main():
     parser.add_argument('--model-dir', type=str, default='/opt/ml/model')
     args = parser.parse_args()
 
+    # Start timing
+    start_time = time.time()
+    
     # Use SageMaker environment variables if present
     input_data_path = os.environ.get('SM_CHANNEL_TRAIN', args.input_data)
     model_dir = os.environ.get('SM_MODEL_DIR', args.model_dir)
