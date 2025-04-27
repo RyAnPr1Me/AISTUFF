@@ -568,6 +568,30 @@ def analyze_dataset(df: pd.DataFrame) -> Dict:
     return stats
 
 
+def inject_final_gaussian_noise(df, noise_std=0.01, noise_prob=0.2, exclude_cols=None):
+    """
+    Inject small Gaussian noise into numeric columns for a random subset of rows.
+    Args:
+        df: DataFrame to augment
+        noise_std: Standard deviation of the Gaussian noise
+        noise_prob: Probability of applying noise to each row
+        exclude_cols: Columns to exclude from augmentation
+    Returns:
+        Augmented DataFrame
+    """
+    df_aug = df.copy()
+    if exclude_cols is None:
+        exclude_cols = []
+    numeric_cols = df_aug.select_dtypes(include=[float, int, np.number]).columns
+    numeric_cols = [col for col in numeric_cols if col not in exclude_cols]
+    if len(numeric_cols) == 0:
+        return df_aug
+    mask = np.random.rand(len(df_aug)) < noise_prob
+    noise = np.random.normal(0, noise_std, size=(mask.sum(), len(numeric_cols)))
+    df_aug.loc[mask, numeric_cols] += noise
+    return df_aug
+
+
 def main():
     setup_logging()
     
@@ -709,6 +733,10 @@ def main():
         if len(combined) < before_dedup:
             logging.info(f"Removed {before_dedup - len(combined)} duplicates from combined dataset")
         
+        # Final step: inject small random noise into numeric features
+        exclude_cols = args.columns if hasattr(args, 'columns') else ['text', 'label']
+        combined = inject_final_gaussian_noise(combined, noise_std=0.01, noise_prob=0.2, exclude_cols=exclude_cols)
+        logging.info("Injected small random Gaussian noise into numeric features as final augmentation step.")
         # Save
         combined.to_csv(args.output, index=False)
         logging.info(f"Saved {len(combined)} rows with {len(combined.columns)} columns to {args.output}")

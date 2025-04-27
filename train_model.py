@@ -235,121 +235,42 @@ def main():
         tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
 
         # Process tabular features
-        feature_cols = [col for col in data.columns if col not in ['text', 'label']]
+        forbidden_features = {'future_close', 'weekly_return'}
+        feature_cols = [col for col in data.columns if col not in ['text', 'label'] and col not in forbidden_features]
         if not feature_cols:
             logging.error("No tabular features found in data. Exiting.")
             return
-            
-        # First, detect and handle date columns
-        logging.info("Checking for date columns in the data...")
+        
+        # Ensure temporal split: sort by date if available
+        date_cols = [col for col in data.columns if 'date' in col.lower() or 'timestamp' in col.lower()]
+        if date_cols:
+            data = data.sort_values(by=date_cols[0]).reset_index(drop=True)
+            logging.info(f"Sorted data by {date_cols[0]} for temporal split.")
+        
         features = data[feature_cols].copy()
-        
-        # Identify potential date columns
-        date_cols = []
-        for col in features.columns:
-            # Check if column contains timestamp or date-like strings
-            if features[col].dtype == 'object':
-                sample_val = str(features[col].iloc[0]).lower() if not pd.isna(features[col].iloc[0]) else ""
-                if '1970-01-01' in sample_val or any(x in col.lower() for x in ['date', 'time', 'day', 'month', 'year', 'timestamp']):
-                    date_cols.append(col)
-                    logging.info(f"Detected potential date column: {col}")
-
-        # Process date columns and extract useful features
-        for col in date_cols:
-            try:
-                # First try to convert to datetime
-                features[col] = pd.to_datetime(features[col], errors='coerce')
-                
-                # Extract useful date features
-                if not features[col].isna().all():
-                    # Extract day of week (0-6)
-                    features[f'{col}_day_of_week'] = features[col].dt.dayofweek
-                    
-                    # Extract month (1-12)
-                    features[f'{col}_month'] = features[col].dt.month
-                    
-                    # Extract day of month (1-31)
-                    features[f'{col}_day'] = features[col].dt.day
-                    
-                    # Extract hour if time data exists
-                    if (features[col].dt.hour != 0).any():
-                        features[f'{col}_hour'] = features[col].dt.hour
-                    
-                    # Is weekend
-                    features[f'{col}_is_weekend'] = features[col].dt.dayofweek.isin([5, 6]).astype(int)
-                    
-                    # Drop original date column
-                    features = features.drop(columns=[col])
-                    logging.info(f"Extracted date features from {col} and dropped original column")
-                else:
-                    # If conversion failed for all values, simply drop the column
-                    features = features.drop(columns=[col])
-                    logging.info(f"Dropped date column {col} - could not convert to datetime")
-            except Exception as e:
-                # If we can't process it as a date, drop it
-                features = features.drop(columns=[col])
-                logging.warning(f"Error processing date column {col}: {str(e)}")
-                
-        # Drop any remaining object columns that couldn't be converted
-        object_cols = features.select_dtypes(include=['object']).columns
-        if not object_cols.empty:
-            for col in object_cols:
-                try:
-                    # Try to convert to numeric 
-                    features[col] = pd.to_numeric(features[col], errors='coerce')
-                    if features[col].isna().sum() > len(features) * 0.3:  # If more than 30% NaNs after conversion
-                        features = features.drop(columns=[col])
-                        logging.info(f"Dropped column {col} due to too many NaNs after numeric conversion")
-                except:
-                    features = features.drop(columns=[col])
-                    logging.info(f"Dropped non-numeric column {col}")
-
-        # Log the final feature columns
-        logging.info(f"Final feature columns after date processing: {features.columns.tolist()}")
-        
-        # Fill remaining NaN values with 0
-        features = features.fillna(0)
-            
-        # Standardize numeric features
-        scaler = StandardScaler()
-        try:
-            # Make sure we have only numeric data before using StandardScaler
-            numeric_features = features.select_dtypes(include=np.number)
-            if numeric_features.empty:
-                logging.error("No numeric features available after preprocessing. Exiting.")
-                return
-                
-            tabular_data = torch.tensor(scaler.fit_transform(numeric_features.values), dtype=torch.float)
-            logging.info(f"Successfully scaled {tabular_data.shape[1]} numeric features")
-        except Exception as e:
-            logging.error(f"Error in scaling features: {str(e)}")
-            # Fall back to a simple approach if standard scaling fails
-            tabular_data = torch.tensor(numeric_features.values, dtype=torch.float)
-            logging.info(f"Using unscaled features due to scaling error")
-        
-        # Pad or truncate to desired dimension
-        if tabular_data.size(1) < TABULAR_DIM:
-            pad = torch.zeros(len(data), TABULAR_DIM - tabular_data.size(1))
-            tabular_data = torch.cat([tabular_data, pad], dim=1)
-            logging.info(f"Padded tabular features from {tabular_data.size(1)-pad.size(1)} to {TABULAR_DIM}")
-        else:
-            tabular_data = tabular_data[:, :TABULAR_DIM]
-            logging.info(f"Truncated tabular features to {TABULAR_DIM} dimensions")
-
         labels = torch.tensor(data["label"].values, dtype=torch.long)
-
-        # Split data (combine splitting and dataset creation)
         X_text = list(data["text"])
-        X_tab = tabular_data
-        y = labels
-
-        X_text_train, X_text_val, X_tab_train, X_tab_val, y_train, y_val = train_test_split(
-            X_text, X_tab, y, test_size=0.2, random_state=42, stratify=y
-        )
-
-        logging.info(f"Splitting data: {len(X_text)} total samples")
-        logging.info(f"Train set: {len(X_text_train)} | Validation set: {len(X_text_val)}")
-        logging.info(f"Tabular feature shape: {tabular_data.shape}")
+        
+        # Temporal split: 80% train, 20% val
+        split_idx = int(0.8 * len(data))
+        X_text_train, X_text_val = X_text[:split_idx], X_text[split_idx:]
+        features_train, features_val = features.iloc[:split_idx], features.iloc[split_idx:]
+        y_train, y_val = labels[:split_idx], labels[split_idx:]
+        
+        # Fit scaler only on training data
+        scaler = StandardScaler()
+        X_tab_train = torch.tensor(scaler.fit_transform(features_train.values), dtype=torch.float)
+        X_tab_val = torch.tensor(scaler.transform(features_val.values), dtype=torch.float)
+        
+        # Pad/truncate to TABULAR_DIM
+        def pad_tab(tab):
+            if tab.size(1) < TABULAR_DIM:
+                pad = torch.zeros(tab.size(0), TABULAR_DIM - tab.size(1))
+                return torch.cat([tab, pad], dim=1)
+            else:
+                return tab[:, :TABULAR_DIM]
+        X_tab_train = pad_tab(X_tab_train)
+        X_tab_val = pad_tab(X_tab_val)
 
         train_ds = MemoryEfficientStockDataset(X_text_train, X_tab_train, y_train, tokenizer)
         val_ds = MemoryEfficientStockDataset(X_text_val, X_tab_val, y_val, tokenizer)
