@@ -1,5 +1,5 @@
 # --- Ticker configuration section ---
-TICKER = "SMCI"  # Changed from NVDA to AAPL as a more reliable alternative
+TICKER = "PLTR"  # Changed from NVDA to AAPL as a more reliable alternative
 # ------------------------------------
 
 import os
