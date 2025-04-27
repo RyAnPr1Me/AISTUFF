@@ -59,6 +59,7 @@ EPOCHS = 5
 LR = 1e-4
 TEXT_MODEL_NAME = "albert-base-v2"  # SageMaker compatible model
 TABULAR_DIM = 32  # Reduced dimension for tabular data
+MAX_TRAIN_SECONDS = 3 * 60 * 60  # 3 hour time limit for SageMaker
 
 # Performance optimizations - Low memory settings
 USE_AMP = True  # Will be auto-disabled if not available
