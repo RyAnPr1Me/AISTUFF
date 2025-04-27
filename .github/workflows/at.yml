@@ -33,17 +33,18 @@ jobs:
           pip install -r requirements.txt
           pip install awscli boto3 huggingface-hub
 
-      - name: Download and Prepare Stock Data
-        run: |
-          python download_and_prepare_stock_data.py
+      # - name: Download and Prepare Stock Data
+      #   run: |
+      #     python download_and_prepare_stock_data.py
 
+      # The following steps assume data is already present in Training_Data/
       - name: Format for ALBERT
         run: |
           python format_for_albert.py --folder Training_Data
 
       - name: Validate and Prepare Data
         run: |
-          python validate_and_prepare.py
+          python validate_and_prepare.py --data-dir Training_Data
 
       - name: Optimize Data for AI Model
         run: |
