@@ -31,3 +31,4 @@ sagemaker==2.93.0
 
 # Add direct dependencies that might be missing
 prettytable==3.3.0
+# End of requirements
