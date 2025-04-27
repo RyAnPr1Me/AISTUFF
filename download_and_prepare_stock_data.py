@@ -1,5 +1,5 @@
 # --- Ticker configuration section ---
-TICKER = "AMZN"  # <--- Set your desired ticker here (overrides --symbol if not None)
+TICKER = "NVDA"  # <--- Set your desired ticker here (overrides --symbol if not None)
 # ------------------------------------
 
 import os
