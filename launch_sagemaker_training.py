@@ -38,7 +38,7 @@ def main():
         # Use a built-in PyTorch estimator as an example
         from sagemaker.pytorch import PyTorch
         estimator = PyTorch(
-            entry_point='train_model.py',
+            entry_point='train_model_simple.py',  # Use the simplified model which is more robust
             source_dir='.',
             role=args.role_arn,
             instance_count=1,
@@ -51,10 +51,7 @@ def main():
                 'input-data': '/opt/ml/input/data/train/optimized_data.csv',
                 'epochs': 5,
                 'batch-size': 32,
-                'lr': 1e-4,
-                'disable_mixed_precision': 'true',  # Disable mixed precision which might cause issues
-                'disable_self_attention': 'true',   # Disable self attention which might use torch.distributed
-                'fusion_type': 'concat'             # Use simple fusion method
+                'lr': 1e-4
             }
         )
 

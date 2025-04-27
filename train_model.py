@@ -1,42 +1,48 @@
 import os
 import sys
 
-# SageMaker container may not have all required dependencies despite requirements.txt
-# Let's make sure we have everything we need
+# Enable GPU usage - remove the forced CPU setting
+# os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+# Increase Python recursion limit for complex models
+sys.setrecursionlimit(10000)
+
+# Enable stack traces for debugging
+os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"
+
 try:
-    import subprocess
-    print("Installing/upgrading critical dependencies...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", 
-                         "torch>=2.0.0", "transformers>=4.30.0", 
-                         "scikit-learn>=1.2.0", "pandas>=2.0.0"])
-    print("Dependencies installed successfully.")
+    import warnings
+    warnings.filterwarnings("ignore")
+
+    import torch
+    import pandas as pd
+    import logging
+    import traceback
+    from transformers import AutoTokenizer
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+    from torch.utils.data import DataLoader, Dataset
+    import numpy as np
+    import time
+    import argparse
+    from src.models.stock_ai import MultimodalStockPredictor
+    from tqdm import tqdm
+    
+    # Print diagnostic information
+    print(f"Python version: {sys.version}")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    print(f"Working directory: {os.getcwd()}")
 except Exception as e:
-    print(f"Warning: Failed to install dependencies: {str(e)}")
-    # Continue anyway - the environment might already have what we need
+    print(f"CRITICAL IMPORT ERROR: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
-os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "0"
-os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
-
-import warnings
-warnings.filterwarnings("ignore")
-
-import torch
-import pandas as pd
-import logging
-import sys
-from transformers import AutoTokenizer
-from src.models.stock_ai import MultimodalStockPredictor
-from torch.utils.data import DataLoader, Dataset
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-from tqdm import tqdm
-import numpy as np
-import time
-import argparse
-
-# Define device for PyTorch
+# Define device - use GPU when available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 #========================================================================
 # Train Model Script with Performance Optimizations and Informative Logging
@@ -294,10 +300,23 @@ def main():
         try:
             # torch.compile may not be available in Kaggle, so skip if not
             if hasattr(torch, "compile"):
-                model = torch.compile(model)
-                logging.info("Model compiled with torch.compile for performance.")
+                # Check if we're using a PyTorch version that supports compile
+                compile_supported = True
+                # Safely check if torch.compiler.is_compiling exists to avoid the error
+                if hasattr(torch, "compiler") and not hasattr(torch.compiler, "is_compiling"):
+                    compile_supported = False
+                    logging.warning("torch.compiler.is_compiling not found. Using older torch.compile approach or disabling compilation.")
+                
+                if compile_supported:
+                    try:
+                        model = torch.compile(model)
+                        logging.info("Model compiled with torch.compile for performance.")
+                    except Exception as e:
+                        logging.warning(f"torch.compile failed: {e}")
+            else:
+                logging.info("torch.compile not available in this PyTorch version.")
         except Exception as e:
-            logging.warning(f"torch.compile not available or failed: {e}")
+            logging.warning(f"Error when attempting to use torch.compile: {e}")
         loss_fn = torch.nn.CrossEntropyLoss()
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2, factor=0.5)
