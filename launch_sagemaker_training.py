@@ -52,7 +52,7 @@ def main():
             role=args.role_arn,
             instance_count=1,
             instance_type=args.instance_type,
-            framework_version='2.1.0',
+            framework_version='1.11.0',
             py_version='py310',
             output_path=s3_output,
             sagemaker_session=session,
