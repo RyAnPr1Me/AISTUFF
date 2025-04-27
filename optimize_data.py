@@ -6,6 +6,7 @@ import os
 from sklearn.feature_selection import mutual_info_classif, SelectKBest
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
+from sklearn.impute import SimpleImputer
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
@@ -215,9 +216,12 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
             logging.info("Running Random Forest feature importance analysis...")
             X_rf = X.select_dtypes(include=[np.number])  # Only numeric for RF
             if len(X_rf.columns) > 0:
+                # Impute missing values before fitting RandomForest
+                imputer = SimpleImputer(strategy='mean')
+                X_rf_imputed = pd.DataFrame(imputer.fit_transform(X_rf), columns=X_rf.columns, index=X_rf.index)
                 # Train a Random Forest with limited depth for speed
                 rf = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
-                rf.fit(X_rf, y)
+                rf.fit(X_rf_imputed, y)
                 
                 # Get feature importances
                 importances = rf.feature_importances_

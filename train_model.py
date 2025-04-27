@@ -1,5 +1,8 @@
 import os
 import sys
+import json
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 # Enable GPU optimization with even more aggressive memory saving
 os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
@@ -18,11 +21,12 @@ try:
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-    from torch.utils.data import DataLoader, Dataset
+    from torch.utils.data import Dataset, DataLoader
     import numpy as np
     import time
     import argparse
     from src.models.stock_ai import MultimodalStockPredictor
+    from src.models.dataloader import multimodal_collate_fn, tft_collate_fn
     from tqdm import tqdm
     
     # Print diagnostic information
@@ -57,7 +61,7 @@ BATCH_SIZE = 16  # Smaller batch size for lower memory usage
 GRADIENT_ACCUMULATION_STEPS = 4  # Use more gradient accumulation steps to compensate for smaller batch
 EPOCHS = 5
 LR = 1e-4
-TEXT_MODEL_NAME = "albert-base-v2"  # SageMaker compatible model
+TEXT_MODEL_NAME = "TemporalFusionTransformer"  # SageMaker compatible model
 TABULAR_DIM = 32  # Reduced dimension for tabular data
 MAX_TRAIN_SECONDS = 3 * 60 * 60  # 3 hour time limit for SageMaker
 
@@ -109,6 +113,27 @@ class MemoryEfficientStockDataset(Dataset):
             "tabular": self.tabular_data[idx],
             "label": self.labels[idx]
         }
+
+class TFTStockDataset(Dataset):
+    """
+    Dataset for TFT: expects DataFrame with group_id, time_idx, target, and features.
+    """
+    def __init__(self, df, feature_cols):
+        self.df = df.reset_index(drop=True)
+        self.feature_cols = feature_cols
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        item = {
+            "group_id": int(row["group_id"]),
+            "time_idx": int(row["time_idx"]),
+            "target": float(row["target"]),
+            "features": torch.tensor(row[self.feature_cols].values, dtype=torch.float)
+        }
+        return item
 
 def print_data_overview(data):
     logging.info(f"Data shape: {data.shape}")
@@ -184,95 +209,297 @@ def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.9
     return df_optimized
 
 def main():
-    try:
-        setup_logging()
-        logging.info("Starting training script with improved error handling")
-        logging.info(f"PyTorch version: {torch.__version__}")
-        logging.info(f"CUDA available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            logging.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
-        logging.info(f"Python: {sys.version}")
+    parser = argparse.ArgumentParser(description="Train stock prediction model")
+    parser.add_argument('--epochs', type=int, default=EPOCHS)
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE)
+    parser.add_argument('--lr', type=float, default=LR)
+    parser.add_argument('--input-data', type=str, default=OPTIMIZED_DATA_PATH)
+    parser.add_argument('--model-dir', type=str, default='/opt/ml/model')
+    # Add the new hyperparameters
+    parser.add_argument('--disable_mixed_precision', type=str, default='false')
+    parser.add_argument('--disable_self_attention', type=str, default='false')
+    parser.add_argument('--fusion_type', type=str, default='concat')
+    parser.add_argument(
+        '--tft', action='store_true',
+        help='Train with Temporal Fusion Transformer'
+    )
+    parser.add_argument(
+        '--tft-meta', type=str, default=None,
+        help='Path to TFT metadata JSON file'
+    )
+    parser.add_argument(
+        '--max-encoder-length', type=int, default=30,
+        help='Max encoder length for TFT (lookback period)'
+    )
+    parser.add_argument(
+        '--max-prediction-length', type=int, default=1,
+        help='Max prediction length for TFT (forecast horizon)'
+    )
+    # Enhanced time series training arguments
+    parser.add_argument('--ts-mode', action='store_true', help='Use time series specific optimizations')
+    parser.add_argument('--backtest-windows', type=int, default=3, help='Number of windows for time series backtesting')
+    parser.add_argument('--seasonal-period', type=int, default=5, help='Seasonal period for time features (e.g. 5 for weekly)')
+    parser.add_argument('--fourier-terms', type=int, default=2, help='Number of Fourier terms for seasonality')
+    parser.add_argument('--decompose-trend', action='store_true', help='Use trend decomposition')
+    parser.add_argument('--differencing', action='store_true', help='Apply first differencing to make data stationary')
+    parser.add_argument('--quantile-forecast', action='store_true', help='Use quantile forecasting for uncertainty estimation')
+    parser.add_argument('--optimization-metric', type=str, default='SMAPE', 
+                      choices=['RMSE', 'MAE', 'MAPE', 'SMAPE', 'MASE'], help='Metric to optimize')
+    parser.add_argument('--hp-tuning-trials', type=int, default=0, help='Number of hyperparameter tuning trials (0 to disable)')
+    
+    args = parser.parse_args()
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--epochs', type=int, default=EPOCHS)
-        parser.add_argument('--batch-size', type=int, default=BATCH_SIZE)
-        parser.add_argument('--lr', type=float, default=LR)
-        parser.add_argument('--input-data', type=str, default=OPTIMIZED_DATA_PATH)
-        parser.add_argument('--model-dir', type=str, default='/opt/ml/model')
-        # Add the new hyperparameters
-        parser.add_argument('--disable_mixed_precision', type=str, default='false')
-        parser.add_argument('--disable_self_attention', type=str, default='false')
-        parser.add_argument('--fusion_type', type=str, default='concat')
-        args = parser.parse_args()
+    # Start timing
+    start_time = time.time()
+    
+    # Use SageMaker environment variables if present
+    input_data_path = os.environ.get('SM_CHANNEL_TRAIN', args.input_data)
+    model_dir = os.environ.get('SM_MODEL_DIR', args.model_dir)
 
-        # Start timing
-        start_time = time.time()
-        
-        # Use SageMaker environment variables if present
-        input_data_path = os.environ.get('SM_CHANNEL_TRAIN', args.input_data)
-        model_dir = os.environ.get('SM_MODEL_DIR', args.model_dir)
+    # Check if input_data_path is a directory and append the file name if necessary
+    if os.path.isdir(input_data_path):
+        input_data_path = os.path.join(input_data_path, 'optimized_data.csv')
 
-        # Check if input_data_path is a directory and append the file name if necessary
-        if os.path.isdir(input_data_path):
-            input_data_path = os.path.join(input_data_path, 'optimized_data.csv')
+    if not os.path.isfile(input_data_path):
+        logging.error(f"Input data file not found: {input_data_path}")
+        sys.exit(1)
 
-        if not os.path.isfile(input_data_path):
-            logging.error(f"Input data file not found: {input_data_path}")
-            sys.exit(1)
+    # Load the data
+    data = pd.read_csv(input_data_path)
+    logging.info(f"Loaded {len(data)} rows and {len(data.columns)} columns from {input_data_path}")
+    if data.isnull().values.any():
+        logging.warning("Data contains NaN values; filling with zeros.")
+        data = data.fillna(0)
 
-        # Load the data
-        data = pd.read_csv(input_data_path)
-        logging.info(f"Loaded {len(data)} rows and {len(data.columns)} columns from {input_data_path}")
-        if data.isnull().values.any():
-            logging.warning("Data contains NaN values; filling with zeros.")
-            data = data.fillna(0)
+    print_data_overview(data)
 
-        print_data_overview(data)
+    # --- Data optimizer step ---
+    # (No need to call optimize_data_for_ai here, already optimized)
 
-        # --- Data optimizer step ---
-        # (No need to call optimize_data_for_ai here, already optimized)
+    # Tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
 
-        # Tokenizer
-        tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_NAME)
+    # Process tabular features
+    forbidden_features = {'future_close', 'weekly_return'}
+    feature_cols = [col for col in data.columns if col not in ['text', 'label'] and col not in forbidden_features]
+    if not feature_cols:
+        logging.error("No tabular features found in data. Exiting.")
+        return
+    
+    # Ensure temporal split: sort by date if available
+    date_cols = [col for col in data.columns if 'date' in col.lower() or 'timestamp' in col.lower()]
+    if date_cols:
+        data = data.sort_values(by=date_cols[0]).reset_index(drop=True)
+        logging.info(f"Sorted data by {date_cols[0]} for temporal split.")
+    
+    features = data[feature_cols].copy()
+    labels = torch.tensor(data["label"].values, dtype=torch.long)
+    X_text = list(data["text"])
+    
+    # Temporal split: 80% train, 20% val
+    split_idx = int(0.8 * len(data))
+    X_text_train, X_text_val = X_text[:split_idx], X_text[split_idx:]
+    features_train, features_val = features.iloc[:split_idx], features.iloc[split_idx:]
+    y_train, y_val = labels[:split_idx], labels[split_idx:]
+    
+    # Fit scaler only on training data
+    scaler = StandardScaler()
+    X_tab_train = torch.tensor(scaler.fit_transform(features_train.values), dtype=torch.float)
+    X_tab_val = torch.tensor(scaler.transform(features_val.values), dtype=torch.float)
+    
+    # Pad/truncate to TABULAR_DIM
+    def pad_tab(tab):
+        if tab.size(1) < TABULAR_DIM:
+            pad = torch.zeros(tab.size(0), TABULAR_DIM - tab.size(1))
+            return torch.cat([tab, pad], dim=1)
+        else:
+            return tab[:, :TABULAR_DIM]
+    X_tab_train = pad_tab(X_tab_train)
+    X_tab_val = pad_tab(X_tab_val)
 
-        # Process tabular features
-        forbidden_features = {'future_close', 'weekly_return'}
-        feature_cols = [col for col in data.columns if col not in ['text', 'label'] and col not in forbidden_features]
-        if not feature_cols:
-            logging.error("No tabular features found in data. Exiting.")
-            return
-        
-        # Ensure temporal split: sort by date if available
-        date_cols = [col for col in data.columns if 'date' in col.lower() or 'timestamp' in col.lower()]
-        if date_cols:
-            data = data.sort_values(by=date_cols[0]).reset_index(drop=True)
-            logging.info(f"Sorted data by {date_cols[0]} for temporal split.")
-        
-        features = data[feature_cols].copy()
-        labels = torch.tensor(data["label"].values, dtype=torch.long)
-        X_text = list(data["text"])
-        
-        # Temporal split: 80% train, 20% val
-        split_idx = int(0.8 * len(data))
-        X_text_train, X_text_val = X_text[:split_idx], X_text[split_idx:]
-        features_train, features_val = features.iloc[:split_idx], features.iloc[split_idx:]
-        y_train, y_val = labels[:split_idx], labels[split_idx:]
-        
-        # Fit scaler only on training data
-        scaler = StandardScaler()
-        X_tab_train = torch.tensor(scaler.fit_transform(features_train.values), dtype=torch.float)
-        X_tab_val = torch.tensor(scaler.transform(features_val.values), dtype=torch.float)
-        
-        # Pad/truncate to TABULAR_DIM
-        def pad_tab(tab):
-            if tab.size(1) < TABULAR_DIM:
-                pad = torch.zeros(tab.size(0), TABULAR_DIM - tab.size(1))
-                return torch.cat([tab, pad], dim=1)
+    if args.tft:
+        try:
+            # Import needed libraries
+            import pytorch_lightning as pl
+            from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+            from pytorch_lightning.loggers import TensorBoardLogger
+            
+            # Load the data with enhanced validation
+            data = pd.read_csv(args.data_path)
+            logging.info(f"Loaded data with shape {data.shape}")
+            
+            # Load metadata or use defaults
+            if args.tft_meta:
+                with open(args.tft_meta, 'r') as f:
+                    meta = json.load(f)
             else:
-                return tab[:, :TABULAR_DIM]
-        X_tab_train = pad_tab(X_tab_train)
-        X_tab_val = pad_tab(X_tab_val)
-
+                # Default metadata
+                meta = {
+                    "time_idx": "time_idx",
+                    "target": "target",
+                    "group_ids": ["group_id"],
+                    "max_encoder_length": args.max_encoder_length if hasattr(args, 'max_encoder_length') else 30,
+                    "max_prediction_length": args.max_prediction_length if hasattr(args, 'max_prediction_length') else 1,
+                }
+                logging.warning(f"No metadata file provided, using default: {meta}")
+            
+            # Data validation
+            for required_col in [meta["time_idx"], meta["target"]] + meta["group_ids"]:
+                if required_col not in data.columns:
+                    raise ValueError(f"Missing required column '{required_col}' for TFT")
+            
+            # Set up data module with enhanced options
+            from src.models.dataloader import TFTDataModule
+            data_module = TFTDataModule(
+                data,
+                time_idx=meta["time_idx"],
+                target=meta["target"],
+                group_ids=meta["group_ids"],
+                max_encoder_length=meta.get("max_encoder_length", 30),
+                max_prediction_length=meta.get("max_prediction_length", 1),
+                batch_size=args.batch_size,
+                num_workers=args.num_workers if hasattr(args, 'num_workers') else 0,
+                # Enhanced time series options
+                add_encoder_length=True,
+                add_relative_time=True,
+                add_target_scales=True,
+                add_lagged_features=args.ts_mode,
+                decomposition=args.decompose_trend
+            )
+            
+            # Prepare data
+            data_module.prepare_data()
+            data_module.setup()
+            
+            # Create TFT model with enhanced metrics
+            from src.models.tft_model import TFTStockPredictor
+            tft_model = TFTStockPredictor(
+                hidden_size=args.hidden_dim if hasattr(args, 'hidden_dim') else 64,
+                lstm_layers=args.lstm_layers if hasattr(args, 'lstm_layers') else 2,
+                dropout=args.dropout,
+                max_encoder_length=meta.get("max_encoder_length", 30),
+                max_prediction_length=meta.get("max_prediction_length", 1),
+                learning_rate=args.lr,
+                # Enhanced time series options
+                use_quantiles=args.quantile_forecast,
+                seasonal_period=args.seasonal_period,
+                optimization_metric=args.optimization_metric
+            )
+            
+            # Create the model
+            model = tft_model.create_model(data_module.train_dataset)
+            
+            # Set up callbacks
+            early_stop_callback = EarlyStopping(
+                monitor="val_loss", 
+                min_delta=1e-4, 
+                patience=10, 
+                verbose=True, 
+                mode="min"
+            )
+            
+            checkpoint_callback = ModelCheckpoint(
+                dirpath=args.output_dir,
+                filename="tft-{epoch:02d}-{val_loss:.4f}",
+                save_top_k=3,
+                monitor="val_loss",
+                mode="min",
+            )
+            
+            # Set up logger
+            logger = TensorBoardLogger(save_dir=args.output_dir, name="tft_logs")
+            
+            # Set up trainer
+            trainer = pl.Trainer(
+                max_epochs=args.epochs,
+                accelerator='auto',
+                devices="auto",
+                callbacks=[early_stop_callback, checkpoint_callback],
+                gradient_clip_val=0.1,
+                logger=logger,
+            )
+            
+            # Train
+            trainer.fit(
+                model=tft_model,
+                train_dataloaders=data_module.train_dataloader(),
+                val_dataloaders=data_module.val_dataloader()
+            )
+            
+            # Save metadata along with the model
+            model_dir = os.path.join(args.output_dir, "final_model")
+            os.makedirs(model_dir, exist_ok=True)
+            
+            # Save the model
+            trainer.save_checkpoint(os.path.join(model_dir, "tft_model.ckpt"))
+            
+            # Save the training metadata
+            with open(os.path.join(model_dir, "tft_metadata.json"), "w") as f:
+                json.dump({
+                    **meta,
+                    "model_params": tft_model.hparams,
+                    "train_data_params": {
+                        "batch_size": args.batch_size,
+                        "max_encoder_length": meta.get("max_encoder_length", 30),
+                        "max_prediction_length": meta.get("max_prediction_length", 1)
+                    },
+                    "data_cols": list(data.columns),
+                    "time_varying_known_reals": data_module.time_varying_known_reals,
+                    "time_varying_unknown_reals": data_module.time_varying_unknown_reals,
+                }, f, indent=2, default=str)
+            
+            logging.info(f"Model saved to {model_dir}")
+            
+            # Hyperparameter tuning if requested
+            if args.hp_tuning_trials > 0:
+                logging.info(f"Running hyperparameter optimization with {args.hp_tuning_trials} trials...")
+                from src.models.ts_utils import optimize_hyperparameters
+                
+                best_params = optimize_hyperparameters(
+                    data_module,
+                    num_trials=args.hp_tuning_trials,
+                    max_epochs=min(args.epochs, 20),
+                    optimization_metric=args.optimization_metric
+                )
+                
+                # Update model with best parameters
+                for param, value in best_params.items():
+                    if hasattr(tft_model, param):
+                        setattr(tft_model, param, value)
+                
+                # Recreate model with optimized parameters
+                model = tft_model.create_model(data_module.train_dataset)
+                logging.info(f"Using optimized hyperparameters: {best_params}")
+            
+            # Enhanced evaluation with backtesting
+            if args.backtest_windows > 0 and args.ts_mode:
+                logging.info(f"Performing time series backtesting with {args.backtest_windows} windows...")
+                from src.models.ts_utils import run_backtesting
+                
+                backtest_results = run_backtesting(
+                    model=tft_model,
+                    df=data,
+                    time_idx=meta["time_idx"],
+                    target=meta["target"],
+                    group_ids=meta["group_ids"],
+                    max_encoder_length=meta.get("max_encoder_length", 30),
+                    max_prediction_length=meta.get("max_prediction_length", 1),
+                    num_windows=args.backtest_windows,
+                    trainer=trainer
+                )
+                
+                # Save backtest results
+                backtest_file = os.path.join(model_dir, "backtest_results.json")
+                with open(backtest_file, "w") as f:
+                    json.dump(backtest_results, f, indent=2)
+                
+                logging.info(f"Backtest results:\n{json.dumps(backtest_results['summary'], indent=2)}")
+            
+        except ImportError as e:
+            logging.error(f"Error importing TFT dependencies: {e}")
+            logging.error("Make sure pytorch-forecasting and pytorch-lightning are installed")
+            raise
+    else:
         train_ds = MemoryEfficientStockDataset(X_text_train, X_tab_train, y_train, tokenizer)
         val_ds = MemoryEfficientStockDataset(X_text_val, X_tab_val, y_val, tokenizer)
 

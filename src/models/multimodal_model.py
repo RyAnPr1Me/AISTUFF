@@ -64,3 +64,22 @@ class MultiModalModel(nn.Module):
         else:
             fused = torch.cat(feats, dim=-1)
         return self.classifier(fused)
+
+class TFTWrapper(nn.Module):
+    """
+    Wrapper for Temporal Fusion Transformer (TFT) model.
+    Expects input dict with keys: group_id, time_idx, features, target (optional).
+    """
+    def __init__(self, tft_model):
+        super().__init__()
+        self.tft = tft_model
+
+    def forward(self, batch):
+        # batch: dict with group_id, time_idx, features, target (optional)
+        # This is a placeholder; actual TFT model expects specific input format
+        return self.tft(
+            group_ids=batch["group_id"],
+            time_idxs=batch["time_idx"],
+            features=batch["features"],
+            targets=batch.get("target", None)
+        )

@@ -62,4 +62,39 @@ for epoch in range(num_epochs):
 - Change `fusion_layers`, `activation`, `tabular_dropout`, etc. when instantiating the model for different architectures.
 - See the source code for more details and options.
 
----
+## Temporal Fusion Transformer Support
+
+This project now includes support for Temporal Fusion Transformer (TFT) models for time series forecasting. TFT combines high-performance multi-horizon forecasting with interpretability features.
+
+### TFT Data Preparation
+
+To prepare data for TFT:
+
+```bash
+python validate_and_prepare.py --data-dir your_data_dir --output output.csv --tft
+```
+
+This creates:
+- A CSV file with data formatted for TFT
+- A metadata JSON file describing variable types
+
+### TFT Training
+
+Train a TFT model:
+
+```bash
+python train_model.py --data-path output.csv --tft --tft-meta output_tft_meta.json --epochs 50
+```
+
+### TFT Prediction
+
+Make predictions with a trained model:
+
+```bash
+python run_tft_prediction.py --model path/to/model.ckpt --data new_data.csv --meta output_tft_meta.json
+```
+
+### TFT Parameters
+
+- `max-encoder-length`: History length used for prediction (default: 30)
+- `max-prediction-length`: Forecast horizon (default: 1)

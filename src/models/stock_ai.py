@@ -95,7 +95,7 @@ except ImportError:
 
 class MultimodalStockPredictor(nn.Module):
     def __init__(self, 
-                text_model_name="albert-base-v2",  # Changed default from large to base
+                text_model_name="TemporalFusionTransformer",  # Changed default from large to base
                 vision_model_name=None,
                 tabular_dim=64,
                 audio_dim=None,

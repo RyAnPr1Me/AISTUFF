@@ -592,6 +592,138 @@ def inject_final_gaussian_noise(df, noise_std=0.01, noise_prob=0.2, exclude_cols
     return df_aug
 
 
+def prepare_tft_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prepare dataset for Temporal Fusion Transformer with enhanced preprocessing.
+    """
+    df = df.copy()
+    
+    # Ensure all required columns exist
+    if 'group_id' not in df.columns:
+        # Default: treat as one time series
+        df['group_id'] = 0
+    
+    # Create time index if not exists
+    if 'time_idx' not in df.columns:
+        if 'date' in df.columns:
+            # Sort by date and create time index
+            if not pd.api.types.is_datetime64_dtype(df['date']):
+                df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            df = df.sort_values(['group_id', 'date'])
+            df['time_idx'] = df.groupby('group_id').cumcount()
+        else:
+            # Just use row index as time
+            df['time_idx'] = np.arange(len(df))
+    
+    # Ensure target variable exists
+    if 'target' not in df.columns and 'label' in df.columns:
+        df['target'] = df['label']
+        
+    # Enhance time features if date column exists
+    if 'date' in df.columns:
+        # Make sure date column is datetime
+        if not pd.api.types.is_datetime64_dtype(df['date']):
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            
+        # Add time features
+        if df['date'].notna().any():
+            # Basic time features
+            df['day_of_week'] = df['date'].dt.dayofweek
+            df['month'] = df['date'].dt.month
+            df['quarter'] = df['date'].dt.quarter
+            df['year'] = df['date'].dt.year
+            df['day_of_month'] = df['date'].dt.day
+            df['day_of_year'] = df['date'].dt.dayofyear
+            df['week_of_year'] = df['date'].dt.isocalendar().week
+            
+            # Calendar indicators
+            df['is_month_start'] = df['date'].dt.is_month_start.astype(int)
+            df['is_month_end'] = df['date'].dt.is_month_end.astype(int)
+            df['is_quarter_start'] = df['date'].dt.is_quarter_start.astype(int)
+            df['is_quarter_end'] = df['date'].dt.is_quarter_end.astype(int)
+            df['is_year_start'] = df['date'].dt.is_year_start.astype(int)
+            df['is_year_end'] = df['date'].dt.is_year_end.astype(int)
+            
+            # Financial market indicators
+            df['is_weekend'] = df['date'].dt.dayofweek.isin([5, 6]).astype(int)
+            
+            # Add Fourier features for seasonality
+            for period in [5, 7, 30]:  # Business week, full week, month
+                for term in range(1, 3):
+                    # Calculate continuous time
+                    t = 2 * np.pi * df['time_idx'] / period
+                    
+                    # Create sin and cos components
+                    df[f'sin_{period}_{term}'] = np.sin(term * t)
+                    df[f'cos_{period}_{term}'] = np.cos(term * t)
+    
+    # Add lag features and rolling statistics
+    for col in ['target']:
+        if col in df.columns:
+            # Add lags
+            for lag in [1, 2, 3, 5, 7]:
+                df[f'{col}_lag_{lag}'] = df.groupby('group_id')[col].shift(lag)
+                
+            # Rolling statistics
+            for window in [3, 7, 14]:
+                # Rolling mean
+                df[f'{col}_roll_mean_{window}'] = (
+                    df.groupby('group_id')[col]
+                    .transform(lambda x: x.rolling(window, min_periods=1).mean())
+                )
+                
+                # Rolling std
+                df[f'{col}_roll_std_{window}'] = (
+                    df.groupby('group_id')[col]
+                    .transform(lambda x: x.rolling(window, min_periods=1).std())
+                )
+                
+                # Rolling min/max
+                df[f'{col}_roll_min_{window}'] = (
+                    df.groupby('group_id')[col]
+                    .transform(lambda x: x.rolling(window, min_periods=1).min())
+                )
+                
+                df[f'{col}_roll_max_{window}'] = (
+                    df.groupby('group_id')[col]
+                    .transform(lambda x: x.rolling(window, min_periods=1).max())
+                )
+                
+            # Create momentum features
+            for window in [3, 7, 14]:
+                # Rate of change
+                df[f'{col}_roc_{window}'] = (
+                    df[col] / df.groupby('group_id')[col].shift(window) - 1
+                )
+                
+                # Z-score
+                df[f'{col}_zscore_{window}'] = (
+                    (df[col] - df[f'{col}_roll_mean_{window}']) / 
+                    (df[f'{col}_roll_std_{window}'] + 1e-8)
+                )
+    
+    # Fix data types
+    df['time_idx'] = df['time_idx'].astype(int)
+    df['group_id'] = df['group_id'].astype(str)
+    
+    # Convert numeric columns to float
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    for col in numeric_cols:
+        if col not in ['time_idx', 'group_id']:
+            df[col] = df[col].astype(float)
+    
+    # Fill missing values (critical for time series models)
+    # First forward-fill (most appropriate for time series)
+    df = df.fillna(method='ffill')
+    # Then backward-fill for any remaining NaNs at the start
+    df = df.fillna(method='bfill')
+    # Finally, fill any remaining NaNs with zeros
+    df = df.fillna(0)
+    
+    logging.info(f"Prepared TFT dataset with {len(df)} rows and {len(df.columns)} columns")
+    return df
+
+
 def main():
     setup_logging()
     
@@ -645,6 +777,24 @@ def main():
         '--report', action='store_true',
         help='Generate detailed dataset report'
     )
+    # Add TFT argument
+    parser.add_argument(
+        '--tft', action='store_true',
+        help='Format output for Temporal Fusion Transformer model'
+    )
+    # Add time series specific arguments
+    parser.add_argument(
+        '--tft-horizon', type=int, default=1,
+        help='Forecast horizon for TFT (max_prediction_length)'
+    )
+    parser.add_argument(
+        '--tft-lookback', type=int, default=30,
+        help='Lookback window for TFT (max_encoder_length)'
+    )
+    parser.add_argument(
+        '--tft-enhanced', action='store_true',
+        help='Use enhanced time series features for TFT'
+    )
     
     args = parser.parse_args()
 
@@ -694,7 +844,6 @@ def main():
 
     validated_dfs = []
     stats_by_file = {}
-    
     for fname in csv_files:
         path = os.path.join(args.data_dir, fname)
         logging.info(f"Processing {fname}...")
@@ -712,6 +861,31 @@ def main():
             )
             
             if cleaned is not None and not cleaned.empty:
+                # --- TFT-specific processing ---
+                if args.tft:
+                    logging.info("TFT mode enabled: formatting for Temporal Fusion Transformer.")
+                    if 'group_id' not in cleaned.columns:
+                        cleaned['group_id'] = 0
+                        logging.info("Added 'group_id' column (all zeros).")
+                    if 'time_idx' not in cleaned.columns:
+                        if 'date' in cleaned.columns:
+                            cleaned = cleaned.sort_values('date')
+                            cleaned['time_idx'] = cleaned.groupby('group_id').cumcount()
+                            logging.info("Added 'time_idx' column based on sorted 'date'.")
+                        else:
+                            cleaned['time_idx'] = np.arange(len(cleaned))
+                            logging.info("Added 'time_idx' column as row index.")
+                    if 'label' in cleaned.columns and 'target' not in cleaned.columns:
+                        cleaned = cleaned.rename(columns={'label': 'target'})
+                        logging.info("Renamed 'label' column to 'target' for TFT.")
+                    for col in cleaned.columns:
+                        if col not in ['group_id', 'time_idx', 'target', 'date']:
+                            try:
+                                cleaned[col] = cleaned[col].astype(float)
+                            except Exception:
+                                pass
+                    logging.info(f"TFT columns: {list(cleaned.columns)}")
+                # --- end TFT-specific ---
                 validated_dfs.append(cleaned)
                 
                 # Generate stats if requested
@@ -733,8 +907,50 @@ def main():
         if len(combined) < before_dedup:
             logging.info(f"Removed {before_dedup - len(combined)} duplicates from combined dataset")
         
+        # Special handling for TFT format
+        if args.tft:
+            # Add enhanced preprocessing
+            combined = prepare_tft_dataset(combined) if args.tft_enhanced else combined
+            
+            # Ensure time ordering
+            combined = combined.sort_values(['group_id', 'time_idx'])
+            
+            # Add metadata row for TFT
+            meta_file = args.output.replace('.csv', '_tft_meta.json')
+            import json
+            
+            # Identify variable types for TFT
+            time_varying_known_reals = [col for col in combined.columns 
+                                       if col not in ['target', 'group_id', 'time_idx', 'date', 'text']]
+            time_varying_unknown_reals = ['target']
+            
+            # Identify target-related lagged features as unknown
+            lag_features = [col for col in time_varying_known_reals if '_lag_' in col and 'target' in col]
+            roll_features = [col for col in time_varying_known_reals if '_roll_' in col and 'target' in col]
+            for feat in lag_features + roll_features:
+                if feat in time_varying_known_reals:
+                    time_varying_known_reals.remove(feat)
+                    time_varying_unknown_reals.append(feat)
+            
+            meta = {
+                "time_idx": "time_idx",
+                "target": "target",
+                "group_ids": ["group_id"],
+                "time_varying_known_reals": time_varying_known_reals,
+                "time_varying_unknown_reals": time_varying_unknown_reals,
+                "max_encoder_length": args.tft_lookback,
+                "max_prediction_length": args.tft_horizon,
+            }
+            
+            with open(meta_file, 'w') as f:
+                json.dump(meta, f, indent=4)
+                
+            logging.info(f"Saved TFT metadata to {meta_file}")
+        
         # Final step: inject small random noise into numeric features
         exclude_cols = args.columns if hasattr(args, 'columns') else ['text', 'label']
+        if args.tft:
+            exclude_cols = ['target', 'group_id', 'time_idx', 'date']
         combined = inject_final_gaussian_noise(combined, noise_std=0.01, noise_prob=0.2, exclude_cols=exclude_cols)
         logging.info("Injected small random Gaussian noise into numeric features as final augmentation step.")
         # Save
