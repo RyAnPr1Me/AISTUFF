@@ -306,8 +306,11 @@ def main():
     input_data_path = args.input_data
     model_dir = args.model_dir
 
-    # Check if input_data_path is a directory and append the file name if necessary
+    # If input_data_path is a directory, do NOT append any filename, just use the directory as-is
     if os.path.isdir(input_data_path):
+        # Do not append any file, use directory as the data source
+        pass
+    else:
         input_data_path = os.path.join(input_data_path, 'optimized_data.csv')
 
     if not os.path.isfile(input_data_path):
