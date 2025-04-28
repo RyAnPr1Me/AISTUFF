@@ -276,6 +276,50 @@ def main():
     else:
         print("No best model checkpoint found.")
 
+    # Make predictions with best model
+    print("Making predictions with best model...")
+    best_model_path = checkpoint_callback.best_model_path
+    if best_model_path:
+        best_tft = TemporalFusionTransformer.load_from_checkpoint(best_model_path)
+        
+        # Predict on validation set
+        predictions = best_tft.predict(val_dataloader, return_y=True)
+        actuals = predictions[1].detach().cpu()
+        predictions = predictions[0].detach().cpu()
+        
+        # Calculate metrics
+        from sklearn.metrics import mean_squared_error, mean_absolute_error
+        rmse = np.sqrt(mean_squared_error(actuals, predictions))
+        mae = mean_absolute_error(actuals, predictions)
+        
+        print(f"Validation RMSE: {rmse:.4f}")
+        print(f"Validation MAE: {mae:.4f}")
+        
+        # Save metrics
+        metrics_path = os.path.join(MODEL_DIR, "metrics.json")
+        with open(metrics_path, 'w') as f:
+            json.dump({
+                'rmse': float(rmse), 
+                'mae': float(mae)
+            }, f)
+        print(f"Metrics saved to {metrics_path}")
+        
+        # Try to visualize predictions
+        try:
+            import matplotlib.pyplot as plt
+            # Plot predictions vs actuals
+            plt.figure(figsize=(12, 6))
+            plt.plot(actuals[:100], label='Actual')
+            plt.plot(predictions[:100], label='Predicted')
+            plt.legend()
+            plt.title('TFT Predictions on Validation Data (first 100 points)')
+            plt.tight_layout()
+            pred_plot_path = os.path.join(MODEL_DIR, "predictions.png")
+            plt.savefig(pred_plot_path)
+            print(f"Prediction plot saved to {pred_plot_path}")
+        except Exception as e:
+            print(f"Could not create prediction plot: {e}")
+    
     print("All done.")
 
 if __name__ == "__main__":
