@@ -140,8 +140,50 @@ def main():
         print(f"After filling, columns are: {list(data.columns)}")
 
     # Identify feature columns (exclude group_id, time_idx, target)
-    feature_cols = [col for col in data.columns if col not in ["group_id", "time_idx", "target"]]
-    print(f"Using feature columns: {feature_cols}")
+    feature_cols = [col for col in data.columns if col not in ["group_id", "time_idx", "target", "text"]]
+    
+    # Clean and prepare the target column
+    if "target" in data.columns:
+        try:
+            # Try to convert target to float if it's not already
+            data["target"] = pd.to_numeric(data["target"], errors="coerce")
+            if data["target"].isna().any():
+                print(f"WARNING: {data['target'].isna().sum()} NaN values detected in target after conversion. Filling with 0.")
+                data["target"] = data["target"].fillna(0)
+        except Exception as e:
+            print(f"Error converting target to numeric: {e}")
+            print("Will use label column instead if available")
+            if "label" in data.columns:
+                data["target"] = pd.to_numeric(data["label"], errors="coerce").fillna(0)
+    
+    # Identify and handle categorical features
+    categorical_cols = []
+    continuous_cols = []
+    
+    for col in feature_cols:
+        try:
+            # Try to convert to numeric
+            numeric_col = pd.to_numeric(data[col], errors="coerce")
+            # If more than 20% of values are NaN after conversion, treat as categorical
+            if numeric_col.isna().mean() > 0.2 or pd.api.types.is_object_dtype(data[col]):
+                categorical_cols.append(col)
+                # For categorical features, ensure they're strings
+                data[col] = data[col].astype(str)
+                print(f"Column {col} treated as categorical with {data[col].nunique()} unique values")
+            else:
+                # Replace NaNs with 0 in numeric columns
+                data[col] = numeric_col.fillna(0)
+                continuous_cols.append(col)
+                print(f"Column {col} treated as continuous")
+        except Exception as e:
+            print(f"Error processing column {col}: {e}")
+            # Default to categorical if there's an error
+            categorical_cols.append(col)
+            data[col] = data[col].astype(str)
+    
+    print(f"Using {len(categorical_cols)} categorical features and {len(continuous_cols)} continuous features")
+    print(f"Categorical features: {categorical_cols}")
+    print(f"Continuous features: {continuous_cols}")
 
     # Split into train/val by time_idx (80% train, 20% val)
     max_time = data["time_idx"].max()
@@ -193,8 +235,23 @@ def main():
     from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
 
     # Prepare TimeSeriesDataSet for TFT
+    from pytorch_forecasting.data import NaNLabelEncoder  # Import NaNLabelEncoder for categorical features
+    
     max_encoder_length = 30
     max_prediction_length = 1
+    
+    # Create encoders for categorical variables
+    categorical_encoders = {}
+    for col in categorical_cols:
+        try:
+            encoder = NaNLabelEncoder(add_nan=True)
+            encoder.fit(train_df[col].astype(str))  # Convert to string to ensure encoder works
+            categorical_encoders[col] = encoder
+        except Exception as e:
+            print(f"Error creating encoder for column {col}: {e}")
+            # Remove problematic columns from categorical_cols
+            categorical_cols.remove(col)
+    
     training = TimeSeriesDataSet(
         train_df,
         time_idx="time_idx",
@@ -204,14 +261,15 @@ def main():
         max_prediction_length=max_prediction_length,
         static_categoricals=[],
         static_reals=[],
-        time_varying_known_categoricals=[],
-        time_varying_known_reals=["time_idx"] + feature_cols,
+        time_varying_known_categoricals=categorical_cols,
+        time_varying_known_reals=["time_idx"] + continuous_cols,
         time_varying_unknown_categoricals=[],
         time_varying_unknown_reals=["target"],
         target_normalizer=None,
         add_relative_time_idx=True,
         add_target_scales=True,
         add_encoder_length=True,
+        categorical_encoders=categorical_encoders,
     )
     validation = TimeSeriesDataSet.from_dataset(training, val_df, predict=True, stop_randomization=True)
 
