@@ -17,10 +17,10 @@ from tqdm import tqdm
 from pathlib import Path  # Ensure this import is present
 
 # Add the src directory to the Python path
-if '__file__' in globals():
+try:
     src_path = str(Path(__file__).resolve().parent / 'src')  # Use __file__ if available
-else:
-    src_path = str(Path().resolve() / 'src')  # Fallback for interactive environments
+except (NameError, AttributeError):
+    src_path = str(Path.cwd() / 'src')  # Fallback for environments where __file__ is not defined
 sys.path.append(src_path)
 
 # Kaggle/Notebook compatibility
