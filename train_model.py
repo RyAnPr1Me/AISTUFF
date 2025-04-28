@@ -69,8 +69,8 @@ if AMP_AVAILABLE:
 #========================================================================
 
 # Paths and configurations - Kaggle settings
-VALIDATED_DATA_PATH = "/kaggle/input/orion/pytorch/small/1/validated_data.csv"
-OPTIMIZED_DATA_PATH = "/kaggle/input/orion/pytorch/small/1/optimized_data.csv"
+VALIDATED_DATA_PATH = "/kaggle/input/stocks/validated_data.csv"
+OPTIMIZED_DATA_PATH = "/kaggle/input/stocks/optimized_data.csv"
 DEFAULT_MODEL_DIR = "/kaggle/working/model"
 
 # Training parameters - Low memory optimized
