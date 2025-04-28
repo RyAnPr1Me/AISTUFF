@@ -116,11 +116,28 @@ def main():
     print_data_overview(data)
 
     # --- Time Series Preparation for TFT ---
-    # Assume data has columns: group_id, time_idx, target, and features
+    # Check and create required columns if missing
     required_cols = ["group_id", "time_idx", "target"]
-    for col in required_cols:
-        if col not in data.columns:
-            raise ValueError(f"Missing required column '{col}' for TFT input.")
+    missing_cols = [col for col in required_cols if col not in data.columns]
+    if missing_cols:
+        print(f"WARNING: Missing columns {missing_cols}. Attempting to create them for demo/training purposes.")
+        if "group_id" in missing_cols:
+            data["group_id"] = 0  # Assign all to one group
+        if "time_idx" in missing_cols:
+            # Try to infer time_idx from a date column, else use row index
+            date_cols = [col for col in data.columns if 'date' in col.lower() or 'timestamp' in col.lower()]
+            if date_cols:
+                data = data.sort_values(by=date_cols[0]).reset_index(drop=True)
+                data["time_idx"] = np.arange(len(data))
+            else:
+                data["time_idx"] = np.arange(len(data))
+        if "target" in missing_cols:
+            # Try to use 'label' or the last column as target
+            if "label" in data.columns:
+                data["target"] = data["label"]
+            else:
+                data["target"] = data.iloc[:, -1]
+        print(f"After filling, columns are: {list(data.columns)}")
 
     # Identify feature columns (exclude group_id, time_idx, target)
     feature_cols = [col for col in data.columns if col not in ["group_id", "time_idx", "target"]]
