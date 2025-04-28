@@ -7,7 +7,7 @@ on:
   pull_request:
     paths:
       - 'download_and_prepare_stock_data.py'
-  workflow_dispatch:  # <-- This is the manual trigger
+  workflow_dispatch:  # This is the manual trigger
 
 jobs:
   run-script:
@@ -41,8 +41,5 @@ jobs:
         env:
           # Needed for push permission
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          git push "https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
->>>>>>> fa99e133d2133fb20c7e261a22e088865105ec2b
