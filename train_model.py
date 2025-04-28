@@ -20,13 +20,14 @@ try:
     from transformers import AutoTokenizer, AutoConfig
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import train_test_split
-    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
     from torch.utils.data import Dataset, DataLoader
     import numpy as np
     import time
     import argparse
-    from src.models.stock_ai import MultimodalStockPredictor
-    from src.models.dataloader import multimodal_collate_fn, tft_collate_fn
+    # Remove src.* imports for Kaggle/Colab/Notebook compatibility
+    # from src.models.stock_ai import MultimodalStockPredictor
+    # from src.models.dataloader import multimodal_collate_fn, tft_collate_fn
     from tqdm import tqdm
     
     # Print diagnostic information
@@ -37,7 +38,8 @@ try:
 except Exception as e:
     print(f"CRITICAL IMPORT ERROR: {e}")
     traceback.print_exc()
-    sys.exit(1)
+    # Do not call sys.exit(1) in notebook environments
+    raise
 
 # Define device - use GPU, TPU, or CPU when available
 if 'COLAB_TPU_ADDR' in os.environ:
@@ -85,13 +87,29 @@ MAX_SEQ_LEN = 64  # Reduced sequence length for lower memory
 EARLY_STOPPING_PATIENCE = 2  # Set patience to 2 epochs for early stopping
 NOISE_STD = 0.01  # Standard deviation for Gaussian noise injection
 
+# Kaggle/Notebook compatibility: auto-detect notebook, adjust logging, and avoid sys.exit
+def in_notebook():
+    try:
+        from IPython import get_ipython
+        if 'IPKernelApp' in get_ipython().config:
+            return True
+    except Exception:
+        pass
+    return False
+
 def setup_logging():
-    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
-    warnings.filterwarnings('ignore', category=FutureWarning)
-    # Ensure we're writing to stdout for SageMaker log collection
-    handler = logging.StreamHandler(sys.stdout)
-    logger = logging.getLogger()
-    logger.addHandler(handler)
+    # Use print for notebook, logging for scripts
+    if in_notebook():
+        import warnings
+        warnings.filterwarnings('ignore', category=FutureWarning)
+        print("Notebook mode: using print for logging.")
+    else:
+        logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+        warnings.filterwarnings('ignore', category=FutureWarning)
+        # Ensure we're writing to stdout for SageMaker log collection
+        handler = logging.StreamHandler(sys.stdout)
+        logger = logging.getLogger()
+        logger.addHandler(handler)
 
 class MemoryEfficientStockDataset(Dataset):
     """Memory efficient dataset that tokenizes on-the-fly"""
@@ -145,38 +163,58 @@ class TFTStockDataset(Dataset):
         return item
 
 def print_data_overview(data):
-    logging.info(f"Data shape: {data.shape}")
-    logging.info(f"Columns: {list(data.columns)}")
-    if 'label' in data.columns:
-        logging.info(f"Label distribution: {data['label'].value_counts().to_dict()}")
-        logging.info(f"Label unique values: {data['label'].unique()}")
-    if 'text' in data.columns:
-        logging.info(f"Sample text: {data['text'].iloc[0]}")
-        logging.info(f"Text length stats: min={data['text'].str.len().min()}, max={data['text'].str.len().max()}, mean={data['text'].str.len().mean():.1f}")
-    logging.info(f"First row: {data.iloc[0].to_dict()}")
-    logging.info(f"Missing values per column: {data.isnull().sum().to_dict()}")
+    if in_notebook():
+        print(f"Data shape: {data.shape}")
+        print(f"Columns: {list(data.columns)}")
+        if 'label' in data.columns:
+            print(f"Label distribution: {data['label'].value_counts().to_dict()}")
+            print(f"Label unique values: {data['label'].unique()}")
+        if 'text' in data.columns:
+            print(f"Sample text: {data['text'].iloc[0]}")
+            print(f"Text length stats: min={data['text'].str.len().min()}, max={data['text'].str.len().max()}, mean={data['text'].str.len().mean():.1f}")
+        print(f"First row: {data.iloc[0].to_dict()}")
+        print(f"Missing values per column: {data.isnull().sum().to_dict()}")
+    else:
+        logging.info(f"Data shape: {data.shape}")
+        logging.info(f"Columns: {list(data.columns)}")
+        if 'label' in data.columns:
+            logging.info(f"Label distribution: {data['label'].value_counts().to_dict()}")
+            logging.info(f"Label unique values: {data['label'].unique()}")
+        if 'text' in data.columns:
+            logging.info(f"Sample text: {data['text'].iloc[0]}")
+            logging.info(f"Text length stats: min={data['text'].str.len().min()}, max={data['text'].str.len().max()}, mean={data['text'].str.len().mean():.1f}")
+        logging.info(f"First row: {data.iloc[0].to_dict()}")
+        logging.info(f"Missing values per column: {data.isnull().sum().to_dict()}")
 
 def print_metrics(epoch, avg_train_loss, train_acc, avg_val_loss, val_acc, val_prec, val_rec, val_f1):
-    logging.info(
+    msg = (
         f"[Epoch {epoch+1}] "
         f"Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.4f} || "
         f"Val Loss: {avg_val_loss:.4f} | Val Acc: {val_acc:.4f} | "
         f"Val Prec: {val_prec:.4f} | Val Rec: {val_rec:.4f} | Val F1: {val_f1:.4f}"
     )
+    if in_notebook():
+        print(msg)
+    else:
+        logging.info(msg)
 
 def print_confusion(y_true, y_pred):
+    from sklearn.metrics import confusion_matrix
     cm = confusion_matrix(y_true, y_pred)
-    logging.info(f"Validation Confusion Matrix:\n{cm}")
-    try:
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-        plt.title("Validation Confusion Matrix")
-        plt.xlabel("Predicted")
-        plt.ylabel("True")
-        plt.show()
-    except Exception:
-        logging.info("matplotlib/seaborn not available for confusion matrix plot.")
+    if in_notebook():
+        print(f"Validation Confusion Matrix:\n{cm}")
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+            plt.title("Validation Confusion Matrix")
+            plt.xlabel("Predicted")
+            plt.ylabel("True")
+            plt.show()
+        except Exception:
+            print("matplotlib/seaborn not available for confusion matrix plot.")
+    else:
+        logging.info(f"Validation Confusion Matrix:\n{cm}")
 
 def optimize_data_for_ai(df, label_col='label', text_col='text', corr_thresh=0.98, min_var=1e-8):
     """
@@ -256,7 +294,7 @@ def main():
                       choices=['RMSE', 'MAE', 'MAPE', 'SMAPE', 'MASE'], help='Metric to optimize')
     parser.add_argument('--hp-tuning-trials', type=int, default=0, help='Number of hyperparameter tuning trials (0 to disable)')
     
-    args = parser.parse_args([])  # For notebook, parse empty args to use defaults
+    args = parser.parse_args([] if in_notebook() else None)  # Use defaults in notebook
 
     # Start timing
     start_time = time.time()
@@ -270,8 +308,13 @@ def main():
         input_data_path = os.path.join(input_data_path, 'optimized_data.csv')
 
     if not os.path.isfile(input_data_path):
-        logging.error(f"Input data file not found: {input_data_path}")
-        sys.exit(1)
+        msg = f"Input data file not found: {input_data_path}"
+        if in_notebook():
+            print(msg)
+            raise FileNotFoundError(msg)
+        else:
+            logging.error(msg)
+            sys.exit(1)
 
     # Load the data
     data = pd.read_csv(input_data_path)
@@ -293,8 +336,13 @@ def main():
     forbidden_features = {'future_close', 'weekly_return'}
     feature_cols = [col for col in data.columns if col not in ['text', 'label'] and col not in forbidden_features]
     if not feature_cols:
-        logging.error("No tabular features found in data. Exiting.")
-        return
+        msg = "No tabular features found in data. Exiting."
+        if in_notebook():
+            print(msg)
+            return
+        else:
+            logging.error(msg)
+            return
     
     # Ensure temporal split: sort by date if available
     date_cols = [col for col in data.columns if 'date' in col.lower() or 'timestamp' in col.lower()]
@@ -506,9 +554,13 @@ def main():
                 logging.info(f"Backtest results:\n{json.dumps(backtest_results['summary'], indent=2)}")
             
         except ImportError as e:
-            logging.error(f"Error importing TFT dependencies: {e}")
-            logging.error("Make sure pytorch-forecasting and pytorch-lightning are installed")
-            raise
+            msg = f"Error importing TFT dependencies: {e}\nMake sure pytorch-forecasting and pytorch-lightning are installed"
+            if in_notebook():
+                print(msg)
+                raise
+            else:
+                logging.error(msg)
+                raise
     else:
         # Only use tokenizer in non-TFT mode
         if not args.tft:
@@ -530,8 +582,8 @@ def main():
                     pin_memory=pin_memory, num_workers=num_workers, persistent_workers=persistent_workers
                 )
 
-                logging.info(f"Train loader: {len(train_loader)} batches | Val loader: {len(val_loader)} batches")
-                logging.info(f"Batch size: {args.batch_size} | Num workers: {num_workers}")
+                print(f"Train loader: {len(train_loader)} batches | Val loader: {len(val_loader)} batches")
+                print(f"Batch size: {args.batch_size} | Num workers: {num_workers}")
 
                 # Initialize model, loss, optimizer, scheduler
                 try:
@@ -851,9 +903,16 @@ def main():
 
             # Catch-all for errors in the non-TFT branch
             except Exception as e:
-                print(f"An error occurred during training: {e}")
-                traceback.print_exc()
-                sys.exit(1)
+                msg = f"An error occurred during training: {e}"
+                if in_notebook():
+                    print(msg)
+                    import traceback as tb
+                    tb.print_exc()
+                    raise
+                else:
+                    logging.error(msg)
+                    traceback.print_exc()
+                    sys.exit(1)
 
 if __name__ == "__main__":
     main()
