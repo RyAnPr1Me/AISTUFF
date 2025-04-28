@@ -316,7 +316,6 @@ def main():
     from pytorch_lightning import Trainer
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
     from pytorch_lightning.callbacks.progress import TQDMProgressBar
-    from pytorch_lightning.strategies import SingleDeviceStrategy
     print("Setting up PyTorch Lightning Trainer...")
     early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=EARLY_STOPPING_PATIENCE, verbose=True, mode="min")
     checkpoint_callback = ModelCheckpoint(
