@@ -59,7 +59,7 @@ jobs:
           cp Training_Data/optimized_data.csv processed_data/
           echo "Data archived for further use or auditing."
 
-      # Commit the processed data file to the repo
+      # Commit the processed data file to the repo using PAT for authentication
       - name: Commit Processed Data File
         run: |
           git config --global user.name "GitHub Actions"
@@ -67,5 +67,8 @@ jobs:
           
           git add Training_Data/optimized_data.csv
           git commit -m "Add optimized time series data"
-          git push
+          
+          # Authenticate with the personal access token (PAT) from GitHub Secrets
+          git remote set-url origin https://github.com/${{ github.repository }}
+          git push https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}
 
