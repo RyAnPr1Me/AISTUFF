@@ -294,20 +294,28 @@ def main():
     
     # Suppress specific warnings we expect during model creation
     warnings.filterwarnings("ignore", message=".*nn.Module.*is already saved during checkpointing.*")
+    warnings.filterwarnings("ignore", message=".*`TorchScript` support for functional optimizers is deprecated.*")
     
-    # Create the TFT model with the parameters - using default loss function
-    # instead of trying to pass a custom torchmetrics loss
+    # Set environment variables to suppress CUDA errors
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TensorFlow logs
+    os.environ["XLA_FLAGS"] = "--xla_gpu_cuda_data_dir=/usr/local/cuda"  # Help XLA find CUDA
+    
+    # Create the TFT model with simpler parameters to avoid compatibility issues
     tft = TemporalFusionTransformer.from_dataset(
         training,
-        **tft_hparams
-        # Remove custom loss parameter to use the default QuantileLoss
+        learning_rate=LR,
+        hidden_size=16,
+        dropout=0.1,
+        hidden_continuous_size=8,
+        reduce_on_plateau_patience=EARLY_STOPPING_PATIENCE
     )
     
     print("Created TFT model - continuing with training")
-
-    # Trainer
+    
+    # Trainer with additional configurations to avoid CUDA warnings
     from pytorch_lightning import Trainer
     from pytorch_lightning.callbacks.progress import TQDMProgressBar
+    from pytorch_lightning.strategies import SingleDeviceStrategy
     print("Setting up PyTorch Lightning Trainer...")
     early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=EARLY_STOPPING_PATIENCE, verbose=True, mode="min")
     checkpoint_callback = ModelCheckpoint(
