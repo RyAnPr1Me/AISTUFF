@@ -1,5 +1,5 @@
 # --- Ticker configuration section ---
-TICKER = "INTC"  # Changed from NVDA to AAPL as a more reliable alternative
+TICKER = "IBM"  # Changed from NVDA to AAPL as a more reliable alternative
 # ------------------------------------
 
 import os
