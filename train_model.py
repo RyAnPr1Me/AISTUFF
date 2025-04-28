@@ -69,8 +69,8 @@ if AMP_AVAILABLE:
 #========================================================================
 
 # Paths and configurations - Kaggle settings
-VALIDATED_DATA_PATH = "/kaggle/input/stocks"
-OPTIMIZED_DATA_PATH = "/kaggle/input/stocks"
+VALIDATED_DATA_PATH = "/kaggle/input/stocks/optimized_data (2).csv"
+OPTIMIZED_DATA_PATH = "/kaggle/input/stocks/optimized_data (2).csv"
 DEFAULT_MODEL_DIR = "/kaggle/working/model"
 
 # Training parameters - Low memory optimized
@@ -306,12 +306,8 @@ def main():
     input_data_path = args.input_data
     model_dir = args.model_dir
 
-    # If input_data_path is a directory, do NOT append any filename, just use the directory as-is
-    if os.path.isdir(input_data_path):
-        # Do not append any file, use directory as the data source
-        pass
-    else:
-        input_data_path = os.path.join(input_data_path, 'optimized_data.csv')
+    # Always use the file path directly, do not treat as directory
+    input_data_path = os.path.join(input_data_path, 'optimized_data(2).csv')
 
     if not os.path.isfile(input_data_path):
         msg = f"Input data file not found: {input_data_path}"
