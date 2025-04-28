@@ -39,8 +39,18 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 
-# Define device - use GPU when available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Define device - use GPU, TPU, or CPU when available
+if 'COLAB_TPU_ADDR' in os.environ:
+    import torch_xla
+    import torch_xla.core.xla_model as xm
+    device = xm.xla_device()
+    print("Using TPU device")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+    print("Using CUDA device")
+else:
+    device = torch.device("cpu")
+    print("Using CPU device")
 print(f"Using device: {device}")
 
 # Check for AMP (automatic mixed precision) support
@@ -53,8 +63,10 @@ if AMP_AVAILABLE:
 # Low-memory SageMaker-compatible train model script
 #========================================================================
 
-# Paths and configurations - Low memory settings
-VALIDATED_DATA_PATH = "Training_Data/validated_data.csv"
+# Paths and configurations - Kaggle settings
+VALIDATED_DATA_PATH = "/kaggle/input/validated_data.csv"
+OPTIMIZED_DATA_PATH = "/kaggle/input/optimized_data.csv"
+DEFAULT_MODEL_DIR = "/kaggle/working/model"
 
 # Training parameters - Low memory optimized
 BATCH_SIZE = 16  # Smaller batch size for lower memory usage
@@ -72,9 +84,6 @@ TOKENIZER_BATCH_SIZE = 128  # Much smaller batch size for tokenization
 MAX_SEQ_LEN = 64  # Reduced sequence length for lower memory
 EARLY_STOPPING_PATIENCE = 2  # Set patience to 2 epochs for early stopping
 NOISE_STD = 0.01  # Standard deviation for Gaussian noise injection
-
-# Input data path - SageMaker compatible
-OPTIMIZED_DATA_PATH = "Training_Data/optimized_data.csv"
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -214,7 +223,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE)
     parser.add_argument('--lr', type=float, default=LR)
     parser.add_argument('--input-data', type=str, default=OPTIMIZED_DATA_PATH)
-    parser.add_argument('--model-dir', type=str, default='/opt/ml/model')
+    parser.add_argument('--model-dir', type=str, default=DEFAULT_MODEL_DIR)
     # Add the new hyperparameters
     parser.add_argument('--disable_mixed_precision', type=str, default='false')
     parser.add_argument('--disable_self_attention', type=str, default='false')
@@ -247,14 +256,14 @@ def main():
                       choices=['RMSE', 'MAE', 'MAPE', 'SMAPE', 'MASE'], help='Metric to optimize')
     parser.add_argument('--hp-tuning-trials', type=int, default=0, help='Number of hyperparameter tuning trials (0 to disable)')
     
-    args = parser.parse_args()
+    args = parser.parse_args([])  # For notebook, parse empty args to use defaults
 
     # Start timing
     start_time = time.time()
-    
-    # Use SageMaker environment variables if present
-    input_data_path = os.environ.get('SM_CHANNEL_TRAIN', args.input_data)
-    model_dir = os.environ.get('SM_MODEL_DIR', args.model_dir)
+
+    # Use Kaggle-friendly paths
+    input_data_path = args.input_data
+    model_dir = args.model_dir
 
     # Check if input_data_path is a directory and append the file name if necessary
     if os.path.isdir(input_data_path):
@@ -400,7 +409,7 @@ def main():
             )
             
             checkpoint_callback = ModelCheckpoint(
-                dirpath=args.output_dir,
+                dirpath=model_dir,
                 filename="tft-{epoch:02d}-{val_loss:.4f}",
                 save_top_k=3,
                 monitor="val_loss",
@@ -408,7 +417,7 @@ def main():
             )
             
             # Set up logger
-            logger = TensorBoardLogger(save_dir=args.output_dir, name="tft_logs")
+            logger = TensorBoardLogger(save_dir=model_dir, name="tft_logs")
             
             # Set up trainer
             trainer = pl.Trainer(
@@ -428,14 +437,14 @@ def main():
             )
             
             # Save metadata along with the model
-            model_dir = os.path.join(args.output_dir, "final_model")
-            os.makedirs(model_dir, exist_ok=True)
+            model_dir_final = os.path.join(model_dir, "final_model")
+            os.makedirs(model_dir_final, exist_ok=True)
             
             # Save the model
-            trainer.save_checkpoint(os.path.join(model_dir, "tft_model.ckpt"))
+            trainer.save_checkpoint(os.path.join(model_dir_final, "tft_model.ckpt"))
             
             # Save the training metadata
-            with open(os.path.join(model_dir, "tft_metadata.json"), "w") as f:
+            with open(os.path.join(model_dir_final, "tft_metadata.json"), "w") as f:
                 json.dump({
                     **meta,
                     "model_params": tft_model.hparams,
@@ -449,7 +458,7 @@ def main():
                     "time_varying_unknown_reals": data_module.time_varying_unknown_reals,
                 }, f, indent=2, default=str)
             
-            logging.info(f"Model saved to {model_dir}")
+            logging.info(f"Model saved to {model_dir_final}")
             
             # Hyperparameter tuning if requested
             if args.hp_tuning_trials > 0:
@@ -490,7 +499,7 @@ def main():
                 )
                 
                 # Save backtest results
-                backtest_file = os.path.join(model_dir, "backtest_results.json")
+                backtest_file = os.path.join(model_dir_final, "backtest_results.json")
                 with open(backtest_file, "w") as f:
                     json.dump(backtest_results, f, indent=2)
                 
@@ -507,9 +516,9 @@ def main():
                 train_ds = MemoryEfficientStockDataset(X_text_train, X_tab_train, y_train, tokenizer)
                 val_ds = MemoryEfficientStockDataset(X_text_val, X_tab_val, y_val, tokenizer)
 
-                # DataLoader optimizations for Kaggle
-                num_workers = min(2, os.cpu_count() or 2)
-                pin_memory = torch.cuda.is_available()
+                # DataLoader optimizations for Kaggle/TPU
+                num_workers = 2
+                pin_memory = (device.type == "cuda")
                 persistent_workers = pin_memory
 
                 train_loader = DataLoader(
@@ -610,11 +619,7 @@ def main():
                         logging.warning(f"Time limit of {MAX_TRAIN_SECONDS/3600:.2f} hours reached. Stopping training.")
                         break
 
-                    logging.info(
-                        f"\n[Epoch {epoch+1}/{args.epochs}] "
-                        f"Elapsed: {elapsed/60:.1f} min | "
-                        f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}"
-                    )
+                    print(f"Epoch {epoch+1}/{args.epochs} started.")
 
                     model.train()
                     train_loss, train_preds, train_labels = 0.0, [], []
@@ -799,15 +804,17 @@ def main():
                         logging.warning(f"Time limit of {MAX_TRAIN_SECONDS/3600:.2f} hours reached. Stopping training.")
                         break
 
-                logging.info("Training complete.")
-                logging.info("Best validation loss: %.4f", best_val_loss)
+                print(f"Epoch {epoch+1}/{args.epochs} finished. Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
 
-                # --- SageMaker: Save model weights ---
+                print("Training complete.")
+                print("Best validation loss: %.4f" % best_val_loss)
+
+                # --- Save model weights to Kaggle working directory ---
                 os.makedirs(model_dir, exist_ok=True)
                 model_path = os.path.join(model_dir, "model_weights.pth")
                 torch.save(model.state_dict(), model_path)
-                logging.info(f"Final model weights saved to {model_path}")
-                
+                print(f"Final model weights saved to {model_path}")
+
                 # Try to save training history as a plot
                 try:
                     import matplotlib.pyplot as plt
@@ -838,13 +845,13 @@ def main():
                     plt.tight_layout()
                     history_path = os.path.join(model_dir, "training_history.png")
                     plt.savefig(history_path)
-                    logging.info(f"Saved training history plot to {history_path}")
+                    print(f"Saved training history plot to {history_path}")
                 except Exception as e:
-                    logging.warning(f"Could not save training history plot: {e}")
+                    print(f"Could not save training history plot: {e}")
 
             # Catch-all for errors in the non-TFT branch
             except Exception as e:
-                logging.error(f"An error occurred during training: {e}")
+                print(f"An error occurred during training: {e}")
                 traceback.print_exc()
                 sys.exit(1)
 
