@@ -301,7 +301,12 @@ def main():
     os.environ["XLA_FLAGS"] = "--xla_gpu_cuda_data_dir=/usr/local/cuda"  # Help XLA find CUDA
     
     # Create the TFT model with simpler parameters to avoid compatibility issues
-    tft = TemporalFusionTransformer.from_dataset(
+    from src.models.tft_model import TFTStockPredictor
+
+    # Replace direct usage of TemporalFusionTransformer with TFTStockPredictor
+    # Wrap the model creation and loading in TFTStockPredictor
+    print("Creating TFT model wrapped in TFTStockPredictor...")
+    tft = TFTStockPredictor.from_dataset(
         training,
         learning_rate=LR,
         hidden_size=16,

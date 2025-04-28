@@ -10,6 +10,7 @@ import json
 import matplotlib.pyplot as plt
 from pathlib import Path
 import pytorch_lightning as pl
+from src.models.tft_model import TFTStockPredictor
 
 def setup_logging():
     logging.basicConfig(
@@ -21,7 +22,6 @@ def setup_logging():
 def load_model(model_path, metadata_path=None):
     """Load TFT model and metadata"""
     try:
-        from pytorch_forecasting import TemporalFusionTransformer
         from pytorch_forecasting.data import TimeSeriesDataSet
     except ImportError:
         logging.error("Missing pytorch-forecasting. Install with: pip install pytorch-forecasting")
@@ -29,7 +29,7 @@ def load_model(model_path, metadata_path=None):
         
     # Load model
     logging.info(f"Loading model from {model_path}")
-    model = TemporalFusionTransformer.load_from_checkpoint(model_path)
+    model = TFTStockPredictor.load_from_checkpoint(model_path)
     
     # Load metadata if provided
     metadata = None
