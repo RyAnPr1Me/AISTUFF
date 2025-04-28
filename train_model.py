@@ -37,9 +37,12 @@ try:
     print(f"Working directory: {os.getcwd()}")
 except Exception as e:
     print(f"CRITICAL IMPORT ERROR: {e}")
-    traceback.print_exc()
+    import traceback as tb
+    tb.print_exc()
     # Do not call sys.exit(1) in notebook environments
-    raise
+    # Do not raise, just print and continue in notebook
+    if not 'get_ipython' in globals() or not hasattr(get_ipython(), 'config'):
+        sys.exit(1)
 
 # Define device - use GPU, TPU, or CPU when available
 if 'COLAB_TPU_ADDR' in os.environ:
