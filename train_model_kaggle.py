@@ -278,6 +278,7 @@ def main():
 
     # TFT model
     import torchmetrics
+    import warnings
 
     # Configure hyperparameters for TFT model
     tft_hparams = {
@@ -291,25 +292,18 @@ def main():
         "reduce_on_plateau_patience": EARLY_STOPPING_PATIENCE,
     }
     
-    # Create the TFT model with proper hyperparameter handling
+    # Suppress specific warnings we expect during model creation
+    warnings.filterwarnings("ignore", message=".*nn.Module.*is already saved during checkpointing.*")
+    
+    # Create the TFT model with the parameters - using default loss function
+    # instead of trying to pass a custom torchmetrics loss
     tft = TemporalFusionTransformer.from_dataset(
         training,
-        **tft_hparams,
-        # Use torchmetrics instead of torch.nn.MSELoss
-        loss=torchmetrics.regression.MeanSquaredError()
+        **tft_hparams
+        # Remove custom loss parameter to use the default QuantileLoss
     )
     
-    # Properly handle hyperparameters (if the method allows 'ignore' parameter)
-    try:
-        if hasattr(tft, "save_hyperparameters") and callable(tft.save_hyperparameters):
-            # Try to use the ignore parameter if available
-            import inspect
-            sig = inspect.signature(tft.save_hyperparameters)
-            if "ignore" in sig.parameters:
-                tft.save_hyperparameters(ignore=['loss', 'logging_metrics'])
-                print("Fixed hyperparameters saving by using ignore parameter")
-    except Exception as e:
-        print(f"Note: Could not apply hyperparameter ignore list: {e}")
+    print("Created TFT model - continuing with training")
 
     # Trainer
     from pytorch_lightning import Trainer
