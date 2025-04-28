@@ -1,4 +1,4 @@
-name: Train AI on New Data
+name: Time Series Data Pipeline
 
 on:
   push:
@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  validate-train:
-    name: Validate and Train AI via SageMaker
+  process-data:
+    name: Process and Prepare Time Series Data
     runs-on: ubuntu-latest
 
     steps:
@@ -31,83 +31,44 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
-          pip install awscli boto3 huggingface-hub
 
-      # - name: Download and Prepare Stock Data
-      #   run: |
-      #     python download_and_prepare_stock_data.py
+      # Step to fetch and prepare time series data
+      - name: Fetch and Prepare Time Series Data
+        run: |
+          python download_and_prepare_stock_data.py
 
-      # The following steps assume data is already present in Training_Data/
-      - name: Format for ALBERT
+      # Step to format the data for time series processing
+      - name: Format for Time Series
         run: |
           python format_for_albert.py --folder Training_Data
 
-      - name: Validate and Prepare Data
+      # Step to validate and clean the time series data
+      - name: Validate and Clean Data
         run: |
           python validate_and_prepare.py --data-dir Training_Data
 
-      - name: Optimize Data for AI Model
+      # Step to optimize the data (e.g., feature engineering, normalization)
+      - name: Optimize Data for Processing
         run: |
           python optimize_data.py --input Training_Data/validated_data.csv --output Training_Data/optimized_data.csv
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Upload Optimized Data to S3
+      # Optional step: Archive processed data for backup or auditing purposes
+      - name: Archive Processed Data
         run: |
-          aws s3 cp Training_Data/optimized_data.csv s3://${{ secrets.S3_BUCKET }}/training/optimized_data.csv
+          mkdir -p processed_data
+          cp Training_Data/optimized_data.csv processed_data/
+          echo "Data archived for further use or auditing."
 
-      - name: Launch SageMaker Training Job
-        env:
-          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      # Commit the processed data file to the repo using GH_TOKEN for authentication
+      - name: Commit Processed Data File
         run: |
-          python launch_sagemaker_training.py \
-            --role-arn "$SAGEMAKER_ROLE_ARN" \
-            --bucket "$S3_BUCKET" \
-            --input-key "training/optimized_data.csv" \
-            --output-key "model/model.tar.gz"
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          git add Training_Data/optimized_data.csv
+          git commit -m "Add optimized time series data"
+          
+          # Authenticate using the GITHUB_TOKEN from GitHub Secrets
+          git remote set-url origin https://github.com/${{ github.repository }}
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
 
-      - name: Download Trained Model from S3
-        run: |
-          mkdir -p trained_model
-          # Get the actual path of the latest model file
-          MODEL_FILE=$(aws s3 ls s3://${{ secrets.S3_BUCKET }}/model/ --recursive | grep .tar.gz | sort | tail -n 1 | awk '{print $4}')
-          
-          if [ -z "$MODEL_FILE" ]; then
-            echo "No model file found in s3://${{ secrets.S3_BUCKET }}/model/"
-            # Check if model might be in a specific job subfolder
-            JOB_ID=$(aws sagemaker list-training-jobs --sort-by CreationTime --sort-order Descending --max-items 1 | jq -r '.TrainingJobSummaries[0].TrainingJobName')
-            if [ "$JOB_ID" != "null" ]; then
-              echo "Looking in most recent job folder: $JOB_ID"
-              MODEL_FILE=$(aws s3 ls s3://${{ secrets.S3_BUCKET }}/model/$JOB_ID/ --recursive | grep .tar.gz | sort | tail -n 1 | awk '{print $4}')
-            fi
-          fi
-          
-          if [ -z "$MODEL_FILE" ]; then
-            echo "Model file still not found. Checking at top level..."
-            MODEL_FILE=$(aws s3 ls s3://${{ secrets.S3_BUCKET }}/ | grep model.tar.gz | sort | tail -n 1 | awk '{print $4}')
-          fi
-          
-          if [ -z "$MODEL_FILE" ]; then
-            echo "ERROR: Could not find model file in S3 bucket"
-            exit 1
-          fi
-          
-          # Download the file
-          echo "Downloading model from s3://${{ secrets.S3_BUCKET }}/$MODEL_FILE"
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/$MODEL_FILE trained_model/model.tar.gz
-          
-          # Extract the model
-          tar -xzf trained_model/model.tar.gz -C trained_model
-
-      - name: Upload model weights to Hugging Face
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          huggingface-cli login --token $HF_TOKEN
-          huggingface-cli upload rmanzo28/Stockai trained_model/model_weights.pth
