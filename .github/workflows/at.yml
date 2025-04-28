@@ -68,7 +68,7 @@ jobs:
           git add Training_Data/optimized_data.csv
           git commit -m "Add optimized time series data"
           
-          # Authenticate using the GH_TOKEN from GitHub Secrets
+          # Authenticate using the GITHUB_TOKEN from GitHub Secrets
           git remote set-url origin https://github.com/${{ github.repository }}
-          git push https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
 
