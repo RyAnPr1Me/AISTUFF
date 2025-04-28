@@ -279,25 +279,37 @@ def main():
     # TFT model
     import torchmetrics
 
+    # Configure hyperparameters for TFT model
+    tft_hparams = {
+        "learning_rate": LR,
+        "hidden_size": 16,
+        "attention_head_size": 1, 
+        "dropout": 0.1,
+        "hidden_continuous_size": 8,
+        "output_size": 1,
+        "log_interval": 10,
+        "reduce_on_plateau_patience": EARLY_STOPPING_PATIENCE,
+    }
+    
+    # Create the TFT model with proper hyperparameter handling
     tft = TemporalFusionTransformer.from_dataset(
         training,
-        learning_rate=LR,
-        hidden_size=16,
-        attention_head_size=1,
-        dropout=0.1,
-        hidden_continuous_size=8,
-        output_size=1,
+        **tft_hparams,
         # Use torchmetrics instead of torch.nn.MSELoss
-        loss=torchmetrics.regression.MeanSquaredError(),
-        log_interval=10,
-        reduce_on_plateau_patience=EARLY_STOPPING_PATIENCE,
+        loss=torchmetrics.regression.MeanSquaredError()
     )
     
-    # Fix hyperparameter saving warning
-    if hasattr(tft, "save_hyperparameters") and callable(tft.save_hyperparameters):
-        # Override the default save_hyperparameters behavior
-        tft.hparams_initial = {k: v for k, v in tft.hparams.items() if k not in ['loss', 'logging_metrics']}
-        print("Fixed hyperparameters saving by removing 'loss' and 'logging_metrics' from hparams")
+    # Properly handle hyperparameters (if the method allows 'ignore' parameter)
+    try:
+        if hasattr(tft, "save_hyperparameters") and callable(tft.save_hyperparameters):
+            # Try to use the ignore parameter if available
+            import inspect
+            sig = inspect.signature(tft.save_hyperparameters)
+            if "ignore" in sig.parameters:
+                tft.save_hyperparameters(ignore=['loss', 'logging_metrics'])
+                print("Fixed hyperparameters saving by using ignore parameter")
+    except Exception as e:
+        print(f"Note: Could not apply hyperparameter ignore list: {e}")
 
     # Trainer
     from pytorch_lightning import Trainer
