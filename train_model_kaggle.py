@@ -283,27 +283,48 @@ def main():
         best_tft = TemporalFusionTransformer.load_from_checkpoint(best_model_path)
         
         # Predict on validation set
-        predictions = best_tft.predict(val_dataloader, return_y=True)
-        actuals = predictions[1].detach().cpu()
-        predictions = predictions[0].detach().cpu()
-        
-        # Calculate metrics
-        from sklearn.metrics import mean_squared_error, mean_absolute_error
-        rmse = np.sqrt(mean_squared_error(actuals, predictions))
-        mae = mean_absolute_error(actuals, predictions)
-        
-        print(f"Validation RMSE: {rmse:.4f}")
-        print(f"Validation MAE: {mae:.4f}")
-        
-        # Save metrics
-        metrics_path = os.path.join(MODEL_DIR, "metrics.json")
-        with open(metrics_path, 'w') as f:
-            json.dump({
-                'rmse': float(rmse), 
-                'mae': float(mae)
-            }, f)
-        print(f"Metrics saved to {metrics_path}")
-        
+        try:
+            # Try the standard prediction approach
+            print("Getting predictions from model...")
+            pred_result = best_tft.predict(val_dataloader, return_y=True)
+            
+            # Handle different return formats
+            if isinstance(pred_result, tuple) and len(pred_result) >= 2:
+                print("Predictions returned as tuple with multiple elements")
+                predictions = pred_result[0].detach().cpu()
+                actuals = pred_result[1].detach().cpu()
+            else:
+                print("Predictions returned in different format - attempting to extract")
+                predictions = pred_result.detach().cpu() if hasattr(pred_result, 'detach') else pred_result
+                # Try to get actuals from dataloader
+                actuals = torch.cat([batch["target"] for batch in iter(val_dataloader)]).cpu()
+            
+            print(f"Predictions shape: {predictions.shape}, Actuals shape: {actuals.shape}")
+            
+            # Flatten arrays if needed
+            predictions = predictions.reshape(-1)
+            actuals = actuals.reshape(-1)
+            
+            # Calculate metrics
+            from sklearn.metrics import mean_squared_error, mean_absolute_error
+            rmse = np.sqrt(mean_squared_error(actuals.numpy(), predictions.numpy()))
+            mae = mean_absolute_error(actuals.numpy(), predictions.numpy())
+            
+            print(f"Validation RMSE: {rmse:.4f}")
+            print(f"Validation MAE: {mae:.4f}")
+            
+            # Save metrics
+            metrics_path = os.path.join(MODEL_DIR, "metrics.json")
+            with open(metrics_path, 'w') as f:
+                json.dump({
+                    'rmse': float(rmse), 
+                    'mae': float(mae)
+                }, f)
+            print(f"Metrics saved to {metrics_path}")
+        except Exception as e:
+            print(f"Error making predictions: {e}")
+            traceback.print_exc()
+            
         # Try to visualize predictions
         try:
             import matplotlib.pyplot as plt
