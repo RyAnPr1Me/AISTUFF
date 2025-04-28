@@ -314,6 +314,7 @@ def main():
     
     # Trainer with additional configurations to avoid CUDA warnings
     from pytorch_lightning import Trainer
+    from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
     from pytorch_lightning.callbacks.progress import TQDMProgressBar
     from pytorch_lightning.strategies import SingleDeviceStrategy
     print("Setting up PyTorch Lightning Trainer...")
