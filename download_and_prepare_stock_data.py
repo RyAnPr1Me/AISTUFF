@@ -78,7 +78,15 @@ def compute_technical_indicators(df):
     
     return df
 
-def create_targets(df):
+def create_targets(df, include_future_data=True):
+    """
+    Create target variables based on future price movements.
+    
+    Args:
+        df: DataFrame with stock data
+        include_future_data: Whether to include future data columns (for training)
+                            or just compute targets (for inference)
+    """
     # Future close price (5 days ahead)
     df['Future_Close'] = df['Close'].shift(-5)
     # Ensure both are Series, not DataFrames (fix for possible duplicate columns)
@@ -94,6 +102,13 @@ def create_targets(df):
     df['Weekly_Return'] = (future_close - close) / close
     # Target: 1 if up, 0 if down or unchanged
     df['label'] = (df['Weekly_Return'] > 0).astype(int)
+    
+    # For inference scenarios, remove future data columns
+    if not include_future_data:
+        future_cols = ['Future_Close', 'Weekly_Return']
+        df = df.drop(columns=[col for col in future_cols if col in df.columns])
+        # Keep only the label column as target
+        
     return df
 
 def normalize_features(df, feature_cols):
@@ -111,10 +126,15 @@ def get_next_data_filename(folder):
             return fpath
         i += 1
 
-def add_text_column(df, symbol):
+def add_text_column(df, symbol, include_future_data=True):
     """
     Add a rich 'text' column for compatibility with the data validator.
     Creates a detailed narrative about the stock performance.
+    
+    Args:
+        df: DataFrame with stock data
+        symbol: Stock ticker symbol
+        include_future_data: Whether to include future-looking statements
     """
     if 'text' not in df.columns:
         texts = []
@@ -158,26 +178,48 @@ def add_text_column(df, symbol):
                 elif vol_change < -30:
                     volume_signal = " Trading volume was significantly lower than previous day."
             
-            # Create forecast hint (this will help the model learn the target)
-            if row['Weekly_Return'] > 0.03:
-                forecast = "Outlook: Strong bullish trend expected in the next week."
-            elif row['Weekly_Return'] > 0:
-                forecast = "Outlook: Slight upward movement may continue."
-            elif row['Weekly_Return'] > -0.03:
-                forecast = "Outlook: Mild bearish pressure in the short term."
-            else:
-                forecast = "Outlook: Significant downward pressure expected."
+            # Create forecast hint (only for training)
+            forecast = ""
+            if include_future_data and 'Weekly_Return' in row:
+                if row['Weekly_Return'] > 0.03:
+                    forecast = "Outlook: Strong bullish trend expected in the next week."
+                elif row['Weekly_Return'] > 0:
+                    forecast = "Outlook: Slight upward movement may continue."
+                elif row['Weekly_Return'] > -0.03:
+                    forecast = "Outlook: Mild bearish pressure in the short term."
+                else:
+                    forecast = "Outlook: Significant downward pressure expected."
                 
             # Format date nicely
             date_str = row['Date'].strftime('%B %d, %Y') if isinstance(row['Date'], pd.Timestamp) else str(row['Date'])
             
             # Create comprehensive text
             text = (f"{symbol.upper()} {movement} ${row['Close']:.2f} on {date_str}. "
-                   f"Day range: ${row['Low']:.2f} to ${row['High']:.2f}.{rsi_signal}{volume_signal} {forecast}")
+                   f"Day range: ${row['Low']:.2f} to ${row['High']:.2f}.{rsi_signal}{volume_signal}")
+            
+            # Only add forecast if include_future_data is True
+            if forecast:
+                text += f" {forecast}"
             
             texts.append(text)
             
         df['text'] = texts
+    
+    return df
+
+def remove_future_data(df):
+    """
+    Ensure no future-looking columns are included in the dataset,
+    which is crucial for inference or evaluation to prevent data leakage.
+    """
+    # List of columns that contain future data
+    future_cols = [
+        'Future_Close', 'Weekly_Return',
+        # Add any other columns derived from future data
+    ]
+    
+    # Drop future columns if they exist
+    df = df.drop(columns=[col for col in future_cols if col in df.columns])
     
     return df
 
@@ -188,7 +230,13 @@ def main():
     parser.add_argument('--start', type=str, default='2015-01-01', help='Start date (YYYY-MM-DD)')
     parser.add_argument('--end', type=str, default='2025-01-01', help='End date (YYYY-MM-DD)')
     parser.add_argument('--output-dir', type=str, default='Training_Data', help='Output folder')
+    parser.add_argument('--inference', action='store_true', help='Prepare data for inference (removes future data)')
     args = parser.parse_args()
+
+    # Determine whether to include future-looking data
+    include_future_data = not args.inference
+    if args.inference:
+        logging.info("Inference mode: future data will be removed")
 
     output_dir = os.environ.get('SM_OUTPUT_DATA_DIR', args.output_dir)
     symbol = TICKER if TICKER else args.symbol
@@ -256,7 +304,7 @@ def main():
     # --- End fix ---
 
     df = compute_technical_indicators(df)
-    df = create_targets(df)
+    df = create_targets(df, include_future_data=include_future_data)
 
     # Select features and columns to keep
     feature_cols = [
@@ -271,7 +319,11 @@ def main():
     if 'DayOfWeek' in df.columns:
         feature_cols.append('DayOfWeek')
         
-    keep_cols = ['Date'] + feature_cols + ['Future_Close', 'Weekly_Return', 'label']
+    # Define columns to keep, based on whether we want future data
+    if include_future_data:
+        keep_cols = ['Date'] + feature_cols + ['Future_Close', 'Weekly_Return', 'label']
+    else:
+        keep_cols = ['Date'] + feature_cols + ['label']
 
     # Drop rows with missing values (from rolling calculations and lags)
     df = df[keep_cols].dropna().reset_index(drop=True)
@@ -283,7 +335,11 @@ def main():
     df_scaled = normalize_features(df, feature_cols)
 
     # Add a 'text' column for compatibility with the data validator
-    df_scaled = add_text_column(df_scaled, symbol)
+    df_scaled = add_text_column(df_scaled, symbol, include_future_data=include_future_data)
+
+    # Final check to remove any future data that might have been added
+    if not include_future_data:
+        df_scaled = remove_future_data(df_scaled)
 
     # Reorder columns: text, features..., label
     ordered_cols = ['text'] + [c for c in df_scaled.columns if c not in ['text', 'label']] + ['label']
@@ -294,6 +350,14 @@ def main():
     try:
         df_scaled.to_csv(out_path, index=False)
         logging.info(f"Saved processed data to {out_path} ({len(df_scaled)} rows).")
+        
+        # If saving for inference, also output a separate file with just the features
+        if not include_future_data:
+            inference_cols = ['Date', 'text'] + feature_cols
+            inference_df = df_scaled[inference_cols]
+            inference_path = os.path.join(os.path.dirname(out_path), "inference_data.csv")
+            inference_df.to_csv(inference_path, index=False)
+            logging.info(f"Saved inference-ready data to {inference_path}")
     except Exception as e:
         logging.error(f"Failed to save CSV: {e}")
         sys.exit(1)
