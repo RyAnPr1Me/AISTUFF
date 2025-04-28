@@ -15,6 +15,9 @@ import time
 import argparse
 from tqdm import tqdm
 
+# Add the src directory to the Python path
+sys.path.append(str(Path(__file__).resolve().parent / 'src'))
+
 # Kaggle/Notebook compatibility
 def in_notebook():
     try:
