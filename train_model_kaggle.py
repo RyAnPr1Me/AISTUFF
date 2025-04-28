@@ -17,7 +17,11 @@ from tqdm import tqdm
 from pathlib import Path  # Ensure this import is present
 
 # Add the src directory to the Python path
-sys.path.append(str(Path(__file__).resolve().parent / 'src'))
+try:
+    src_path = str(Path(__file__).resolve().parent / 'src')  # Use __file__ if available
+except NameError:
+    src_path = str(Path().resolve() / 'src')  # Fallback for interactive environments
+sys.path.append(src_path)
 
 # Kaggle/Notebook compatibility
 def in_notebook():
