@@ -1,5 +1,5 @@
 # --- Ticker configuration section ---
-TICKER = "PLTR"  # Changed from NVDA to AAPL as a more reliable alternative
+TICKER = "META"  # Changed from NVDA to AAPL as a more reliable alternative
 # ------------------------------------
 
 import os
