@@ -1,5 +1,5 @@
 # --- Ticker configuration section ---
-TICKER = "VTI"  # Changed from NVDA to AAPL as a more reliable alternative
+TICKER = "MA"  # Changed from NVDA to AAPL as a more reliable alternative
 # ------------------------------------
 
 import os
